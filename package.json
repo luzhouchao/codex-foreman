@@ -1,0 +1,12 @@
+{
+  "name": "codex-foreman",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=2 tests/pi.test.mjs tests/opencode-run.test.mjs tests/discuss.test.mjs tests/review.test.mjs tests/run.test.mjs tests/host.test.mjs tests/codex-hooks.test.mjs tests/auto-watch.test.mjs"
+  }
+}

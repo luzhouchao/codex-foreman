@@ -1,0 +1,11 @@
+{
+  "dispatch": { "auto": false, "watch": "off", "intro": false },
+  "agents": {
+    "pi-worker": { "type": "pi cli", "model": "REPLACE_PROVIDER/REPLACE_MODEL", "run_access": "edit", "max_parallel": 2 }
+  },
+  "levels": {
+    "run": { "simple": "codex host", "normal": { "agent": "pi-worker" }, "complex": { "agent": "pi-worker" } },
+    "review": { "simple": "codex host", "normal": { "agent": "pi-worker" }, "complex": { "agent": "pi-worker" } },
+    "discuss": { "simple": "codex host", "normal": [{ "agent": "pi-worker" }], "complex": [{ "agent": "pi-worker" }] }
+  }
+}

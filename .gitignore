@@ -1,0 +1,4 @@
+*.local.json
+.local-smoke/
+node_modules/
+*.local.txt
