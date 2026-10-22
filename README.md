@@ -49,6 +49,8 @@ node .\skills\codex-foreman\scripts\cli.mjs status --workspace "E:\your-workspac
 
 ## 测试
 
+日常验收以本机 `npm test` 为准；GitHub Actions 测试仅手动触发。
+
 ```powershell
 npm test
 ```
