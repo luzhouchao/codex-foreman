@@ -2,3 +2,4 @@
 .local-smoke/
 node_modules/
 *.local.txt
+.codex/foreman/

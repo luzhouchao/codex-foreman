@@ -6,7 +6,7 @@ import { openAutoWatch } from './auto-watch.mjs';
 import { HOST_SESSION, checkAdmission, groupScopeOwner, isCancelled } from './records.mjs';
 import { makeTracker } from './tracker.mjs';
 import { computeReviewScope } from './review-scope.mjs';
-import { M, die, notice, relativePath, pathKey, whoOf, modelOf, replaceFile, killTree, looksLikeQuestion, looksLikeInputPrompt, looksLikeFinalQuestion, needsDecision } from './util.mjs';
+import { M, die, notice, relativePath, pathKey, whoOf, modelOf, writeJsonAtomic, killTree, looksLikeQuestion, looksLikeInputPrompt, looksLikeFinalQuestion, needsDecision } from './util.mjs';
 
 const INPUT_WAIT_MIN = 3;
 
@@ -88,13 +88,8 @@ function startRun(ctx, { started = Date.now(), track = [], modelShown = ctx.mode
     started_at: new Date(started).toISOString(), status: 'running', pid: process.pid, session_id: ctx.sessionId || null,
     host_session: HOST_SESSION,
   };
-  const writeMeta = () => {
-    const file = path.join(dir, 'meta.json');
-    // 同组任务会并发读取元数据，替换完整文件，避免把半份 JSON 当成没有记录。
-    const target = atomic || meta.group != null ? `${file}.tmp` : file;
-    fs.writeFileSync(target, JSON.stringify(meta, null, 2));
-    if (target !== file) replaceFile(target, file);
-  };
+  const writeMeta = () => writeJsonAtomic(path.join(dir, 'meta.json'), meta);
+
   let rejection;
   try {
     writeMeta();
@@ -127,11 +122,15 @@ function finishRun(run, result, code = result.exit_code, observed = {}) {
       if (after !== scope.fingerprint) result.warnings.push(M.reviewScopeChanged);
     }
   }
+  if (run.meta.native_session_dir) {
+    result.native_session_dir = run.meta.native_session_dir;
+    result.native_session_file = run.meta.native_session_file || null;
+  }
   result.questions = collectQuestions({ ...result, ...observed, last: observed.last ?? result.last_message ?? '' });
   const decisions = result.questions.filter(needsDecision).length;
   result.needs_decision = decisions > 0;
   if (decisions) result.notes.push(M.needsDecisionNote(decisions));
-  fs.writeFileSync(path.join(run.ctx.dir, 'result.json'), JSON.stringify(result, null, 2));
+  writeJsonAtomic(path.join(run.ctx.dir, 'result.json'), result);
   run.writeMeta(); // 在 result.json 之后写，watch 看到状态变化时结果已经就绪
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   process.exitCode = code;

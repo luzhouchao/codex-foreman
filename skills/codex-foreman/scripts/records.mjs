@@ -1,7 +1,7 @@
 // 记录目录、启动登记锁、准入、活动状态和 watch 启动器。
 import fs from 'node:fs';
 import path from 'node:path';
-import { ENTRY, defaultRunsRoot, runsMovedNow, resolveAgentAlias, DEFAULT_AGENT_PARALLEL } from './config.mjs';
+import { ENTRY, defaultRunsRoot, resolveAgentAlias, DEFAULT_AGENT_PARALLEL } from './config.mjs';
 import { M, die, pidAlive, sleep, pathKey, clip, oneLine, plainCommand } from './util.mjs';
 
 // 终止标记：cancel 命令和实时查看里按 x 时写进任务的记录目录，运行中的任务看到就停下。
@@ -17,9 +17,9 @@ const HOST_SESSION = process.env.CODEX_THREAD_ID || null;
 let RUNS_ROOT;
 
 // 入口先加载配置，再搬记录目录和重写启动器，保持首次运行的副作用顺序。
-function initializeRecords(config) {
-  RUNS_ROOT = config.dispatch.runs_dir ? path.resolve(config.dispatch.runs_dir) : defaultRunsRoot();
-  if (runsMovedNow) writeWatchLauncher();
+function initializeRecords(config, workspace = process.cwd()) {
+  RUNS_ROOT = config.dispatch.runs_dir ? path.resolve(workspace, config.dispatch.runs_dir) : defaultRunsRoot();
+  if (fs.existsSync(RUNS_ROOT)) writeWatchLauncher();
 }
 
 const isCancelled = (dir) => fs.existsSync(path.join(dir, CANCEL_FILE));
@@ -34,6 +34,7 @@ function writeWatchLauncher() {
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 const candidates = ${JSON.stringify([...new Set([real, self])])};
+process.env.CODEX_FOREMAN_RUNS_DIR = ${JSON.stringify(RUNS_ROOT)};
 process.argv.splice(2, 0, 'watch');
 await import(pathToFileURL(candidates.find((p) => fs.existsSync(p)) ?? candidates[0]).href);
 `;
@@ -60,16 +61,28 @@ async function newRunDir() {
   const cleanup = () => fs.rmSync(lock, { force: true });
   process.once('exit', cleanup);
   const release = () => { cleanup(); process.removeListener('exit', cleanup); };
-  const previous = listRuns()[0] || '';
-  let id;
-  do {
-    if (id) await sleep(10);
-    const d = new Date();
+  // ID 是单调记录标识，真实时间以 started_at 为准；时钟回拨时不等待墙钟追上。
+  const stamp = (d) => {
     const p = (n) => String(n).padStart(2, '0');
-    id = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${Math.random().toString(36).slice(2, 6)}`;
-  } while (id <= previous);
-  const dir = path.join(RUNS_ROOT, id);
-  fs.mkdirSync(dir, { recursive: true });
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  };
+  const previous = listRuns().find((name) => {
+    const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-[a-z0-9]{4}$/.exec(name);
+    if (!m) return false;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+    return Number.isFinite(d.getTime()) && stamp(d) === name.slice(0, 15);
+  }) || '';
+  let d = new Date(), id, dir;
+  for (;;) {
+    id = `${stamp(d)}-${Math.random().toString(36).slice(2, 6).padEnd(4, '0')}`;
+    if (previous && id <= previous) {
+      const t = previous.slice(0, 15);
+      d = new Date(Number(t.slice(0, 4)), Number(t.slice(4, 6)) - 1, Number(t.slice(6, 8)), Number(t.slice(9, 11)), Number(t.slice(11, 13)), Number(t.slice(13, 15)) + 1);
+      continue;
+    }
+    dir = path.join(RUNS_ROOT, id);
+    try { fs.mkdirSync(dir); break; } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
   writeWatchLauncher();
   return { id, dir, release };
 }
@@ -84,9 +97,9 @@ function listRuns() {
 
 function findRun(ref) {
   const id = ref === 'last' ? listRuns()[0] : ref;
-  if (!id) die(M.noRuns);
+  if (!id) die(`${M.noRuns}\nruns_root: ${RUNS_ROOT}\n请使用 --workspace <主工作区绝对路径> 定位记录。`);
   const dir = path.join(RUNS_ROOT, id);
-  if (!fs.existsSync(path.join(dir, 'meta.json'))) die(M.runNotFound(ref));
+  if (!fs.existsSync(path.join(dir, 'meta.json'))) die(`${M.runNotFound(ref)}\nruns_root: ${RUNS_ROOT}\n请使用 --workspace <主工作区绝对路径> 定位记录。`);
   return { id, dir, meta: JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')) };
 }
 
@@ -196,9 +209,11 @@ function runOutcome(run) {
   if (run.meta.status === 'running' && !pidAlive(run.meta.pid)) run.meta = readMeta(run.dir) || run.meta;
   const m = run.meta;
   const running = isRunning(m);
-  const status = m.status === 'running' && !running ? 'interrupted' : m.status;
+  let status = m.status === 'running' && !running ? 'interrupted' : m.status;
   const file = path.join(run.dir, 'result.json');
   const result = !running && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  // result 先原子写入，是终态权威；进程退出后可恢复尚未来得及发布的 meta 终态。
+  if (!running && result?.status) status = result.status;
   // 交回问题的任务已经正常结束，只是有事要 Codex 决定，不算失败
   const blocked = status === 'needs_input' || status === 'done' && (result?.needs_decision || result?.report?.status === 'blocked');
   const ok = !blocked && status === 'done' && (!result?.report?.status || result.report.status === 'completed');

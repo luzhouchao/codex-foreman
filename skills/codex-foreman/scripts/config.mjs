@@ -4,16 +4,13 @@ import { spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import os from 'node:os';
 import path from 'node:path';
-import { HERE, M, notice, isObject, readJson, die, pidAlive, replaceFile, closestMatches } from './util.mjs';
+import { HERE, M, notice, isObject, readJson, die, replaceFile, closestMatches } from './util.mjs';
 
 const ENTRY = path.join(HERE, 'cli.mjs');
 const SCHEMA = path.join(HERE, '..', 'schemas', 'report.schema.json');
 const DISCUSS_SCHEMA = path.join(HERE, '..', 'schemas', 'discuss.schema.json');
 
-// 改名前（codex-bridge）用的位置，只用于迁移和兼容。
-const LEGACY_CONFIG = process.env.CODEX_FOREMAN_LEGACY_CONFIG || path.join(os.homedir(), '.codex', 'codex-bridge.json');
-const LEGACY_PREFS = path.join(path.dirname(LEGACY_CONFIG), 'codex-bridge.md');
-const LEGACY_RUNS = path.join(os.homedir(), '.codex', 'codex-runs');
+// 旧项目文件常量保留兼容接口；不会自动导入旧全局配置。
 const LEGACY_PROJECT_CONFIG = path.join('.codex', 'codex-bridge.json');
 const LEGACY_PROJECT_PREFS = path.join('.codex', 'codex-bridge.md');
 
@@ -32,20 +29,6 @@ const USER_CONFIG = CUSTOM_CONFIG || path.join(HOME_DIR, 'config.json');
 const USER_PREFS = path.join(path.dirname(USER_CONFIG), 'preferences.md');
 const PROJECT_CONFIG = path.join('.codex', 'foreman.json');
 const PROJECT_PREFS = path.join('.codex', 'foreman.md');
-
-// 改名迁移：第一次运行时把旧配置和旧偏好复制到新位置，旧文件保留。用户用环境变量指定了配置路径时不动。
-function migrateLegacyFiles() {
-  if (CUSTOM_CONFIG) return;
-  for (const [from, to, msg] of [[LEGACY_CONFIG, USER_CONFIG, M.legacyConfigCopied], [LEGACY_PREFS, USER_PREFS, M.legacyPrefsCopied]]) {
-    if (fs.existsSync(to) || !fs.existsSync(from)) continue;
-    try {
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to, fs.constants.COPYFILE_EXCL);
-      notice(msg(from, to));
-    } catch (e) { if (e.code !== 'EEXIST') notice(M.legacyCopyFailed(from, e.message)); } // 并发启动时别的进程先复制了
-  }
-}
-// Separate distribution: never import another host configuration.
 
 // 项目里的文件还是旧名字时照常读取，提示改名，不改动项目里的文件。
 function projectFile(cwd, current, legacy) { return path.join(cwd, current); }
@@ -372,11 +355,6 @@ function detectEnvironment(adapters, agents = {}) {
     api_keys: ['DEEPSEEK_API_KEY', 'KIMI_API_KEY', 'MOONSHOT_API_KEY', 'MIMO_API_KEY'].filter((key) => !!process.env[key]) };
 }
 
-const API_STARTERS = [
-  ['DeepSeek', ['DEEPSEEK_API_KEY'], 'https://api.deepseek.com', 'deepseek-v4-pro'],
-  ['Kimi', ['KIMI_API_KEY', 'MOONSHOT_API_KEY'], 'https://api.moonshot.cn/v1', 'kimi-k2.6'],
-  ['MiMo', ['MIMO_API_KEY'], 'https://api.xiaomimimo.com/v1', 'mimo-v2.6-pro'],
-];
 function buildStarterConfig(environment) {
   return structuredClone(DEFAULT_CONFIG);
 }
@@ -392,8 +370,6 @@ function loadConfig(cwd, adapters) {
       let parts = '默认由 Codex 主控处理；请配置 pi 或 opencode 的实际模型后启用调度。';
       if (environment.opencode.models) parts += M.starterOpencode(environment.opencode.models);
       if (environment.pi.models) parts += M.starterPi(environment.pi.models);
-      const names = API_STARTERS.filter(([, , , model]) => starter.agents[model]).map(([name]) => name);
-      if (names.length) parts += M.starterApi(M.list(names));
       notice(M.starterCreated(USER_CONFIG, parts + M.starterNext));
     } catch (e) { if (e.code !== 'EEXIST') notice(M.starterFailed(USER_CONFIG, e.message)); }
   }
@@ -410,45 +386,8 @@ function loadConfig(cwd, adapters) {
 }
 
 
-// 默认的记录目录。改名前的记录在 ~/.codex/codex-runs，第一次运行时整个搬过来。
-// 几个进程可能同时启动（比如同时发起讨论），用锁保证只搬一次；旧目录里还有任务在跑就先不搬，这次继续用旧目录。
-let runsMovedNow = false;
-function defaultRunsRoot() { return path.join(HOME_DIR, "runs"); }
-function unusedLegacyRunsMigration() {
-  const target = path.join(HOME_DIR, 'runs');
-  if (fs.existsSync(target) || !fs.existsSync(LEGACY_RUNS)) return target;
-  const lock = path.join(HOME_DIR, '.migrate.lock');
-  const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  try {
-    fs.mkdirSync(HOME_DIR, { recursive: true });
-    for (let waited = 0; ; waited += 50) {
-      try { fs.writeFileSync(lock, String(process.pid), { flag: 'wx' }); break; }
-      catch (e) {
-        if (e.code !== 'EEXIST') throw e;
-        if (waited > 15000) fs.rmSync(lock, { force: true }); // 持有者被强杀留下的锁
-        wait(50);
-        if (fs.existsSync(target)) return target; // 别的进程已经搬完
-      }
-    }
-  } catch (e) { notice(M.runsMoveFailed(LEGACY_RUNS, e.message)); return LEGACY_RUNS; }
-  try {
-    if (fs.existsSync(target)) return target;
-    const running = fs.readdirSync(LEGACY_RUNS).some((id) => {
-      try {
-        const m = JSON.parse(fs.readFileSync(path.join(LEGACY_RUNS, id, 'meta.json'), 'utf8'));
-        return m.status === 'running' && pidAlive(m.pid);
-      } catch { return false; }
-    });
-    if (running) { notice(M.runsMoveDeferred(LEGACY_RUNS)); return LEGACY_RUNS; }
-    fs.renameSync(LEGACY_RUNS, target);
-    runsMovedNow = true;
-    notice(M.runsMoved(LEGACY_RUNS, target));
-    return target;
-  } catch (e) {
-    notice(M.runsMoveFailed(LEGACY_RUNS, e.message));
-    return fs.existsSync(target) ? target : LEGACY_RUNS;
-  } finally { fs.rmSync(lock, { force: true }); }
-}
+// 默认记录目录；不会自动移动旧全局记录。
+function defaultRunsRoot() { return path.join(HOME_DIR, 'runs'); }
 
 function pickProfile(cfg, o, mode, adapters, fallbackModel = null, parentAgent = null) {
   let requested = o.agent && resolveAgentAlias(o.agent, cfg);
@@ -500,4 +439,4 @@ function pickProfile(cfg, o, mode, adapters, fallbackModel = null, parentAgent =
   return { level, agentName: entry.agent, agent, model: o.model || entry.model || agent.model || fallbackModel, effort: effort ?? null };
 }
 
-export { ENTRY, SCHEMA, DISCUSS_SCHEMA, USER_CONFIG, USER_PREFS, PROJECT_PREFS, LEGACY_PROJECT_PREFS, DEFAULT_AGENT_PARALLEL, DEFAULT_CONFIG, HOST_CODEX, projectFile, loadConfig, pickProfile, defaultRunsRoot, runsMovedNow, readAgentAliases, resolveAgentAlias, migrateStructure, renameAgentsByModel, detectEnvironment, buildStarterConfig , staleAliases, unknownAgentError };
+export { ENTRY, SCHEMA, DISCUSS_SCHEMA, USER_CONFIG, USER_PREFS, PROJECT_PREFS, LEGACY_PROJECT_PREFS, DEFAULT_AGENT_PARALLEL, DEFAULT_CONFIG, HOST_CODEX, projectFile, loadConfig, pickProfile, defaultRunsRoot, readAgentAliases, resolveAgentAlias, migrateStructure, renameAgentsByModel, detectEnvironment, buildStarterConfig , staleAliases, unknownAgentError };

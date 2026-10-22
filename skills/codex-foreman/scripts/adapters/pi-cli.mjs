@@ -2,10 +2,11 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { SCHEMA, DISCUSS_SCHEMA } from '../config.mjs';
 import { MAX_REVIEW_CHARS } from '../review-scope.mjs';
-import { newRunDir, isCancelled } from '../records.mjs';
+import { newRunDir, isCancelled, readMeta } from '../records.mjs';
 import { startRun, finishDiscussion, execute, eventWriter, runLimits, reportWithRepair, spawnCli, validateSchema } from '../runner.mjs';
 import { M, die, isObject, binCommand, pathCommand, npmEntry, killTree, readAttachments, focusFiles, relativePath, whoOf, closestMatches } from '../util.mjs';
 
@@ -29,10 +30,11 @@ const PROGRESS_MS = Number(process.env.CODEX_FOREMAN_TEST_PROGRESS_MS) || 5000;
 const LOG_SKIP = new Set(['message_update', 'message_start', 'turn_end', 'agent_end']);
 const ISOLATE = ['--no-extensions','--no-skills', '--no-prompt-templates', '--no-themes', '--no-mcp', '--no-approve', '--offline'];
 
-function piArgs({ model, effort, access, session, name, ephemeral = false }) {
+function piArgs({ model, effort, access, session, sessionDir, name, ephemeral = false }) {
   const args = ['--mode', 'json', '--model', model, ...ISOLATE, '-e', GUARD];
   if (effort != null && effort !== 'default') args.push('--thinking', effort);
   args.push(...(TOOLS[access].length ? ['--tools', TOOLS[access].join(',')] : ['--no-tools']));
+  if (sessionDir) args.push('--session-dir', sessionDir);
   if (session) args.push('--session', session);
   if (ephemeral) args.push('--no-session');
   if (name) args.push('--name', name);
@@ -201,10 +203,49 @@ async function executePi(ctx) {
   return finishDiscussion(run, { ...await piSession(run, schema, access), files, changesNote: M.piNoChanges });
 }
 
+// --session 接受文件路径；复制后续接，避免改写父任务或旧全局会话。
+function localSession(ctx) {
+  const dir = path.join(ctx.dir, 'pi-sessions');
+  fs.mkdirSync(dir, { recursive: true });
+  if (!ctx.sessionId) return { dir, file: null };
+  const parent = ctx.parentDir && readMeta(ctx.parentDir);
+  const candidates = [parent?.native_session_file, ctx.parentDir && path.join(ctx.parentDir, 'pi-native-session.jsonl')].filter(Boolean);
+  const roots = [parent?.native_session_dir, path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent'), 'sessions')].filter(Boolean);
+  const visit = (root) => {
+    if (!fs.existsSync(root)) return;
+    for (const item of fs.readdirSync(root, { withFileTypes: true })) {
+      const file = path.join(root, item.name);
+      if (item.isDirectory()) visit(file);
+      else if (item.name.endsWith('.jsonl')) {
+        try { const first = JSON.parse(fs.readFileSync(file, 'utf8').split('\n')[0]); if (first.type === 'session' && first.id === ctx.sessionId) candidates.push(file); } catch { /* 非会话文件 */ }
+      }
+    }
+  };
+  for (const root of roots) { if (!candidates.some((f) => fs.existsSync(f))) visit(root); }
+  const source = candidates.find((f) => fs.existsSync(f));
+  if (!source) die(`找不到 pi 原生会话 ${ctx.sessionId}；请恢复父任务的 pi-sessions 或旧全局会话文件后续接。`);
+  const file = path.join(dir, path.basename(source));
+  fs.copyFileSync(source, file);
+  return { dir, file };
+}
+
 async function piSession(run, schema, access) {
   const { ctx, started, meta, writeMeta } = run;
   const { dir, agentName, agent, model, effort, cwd, prompt } = ctx;
   const { deadline, stallMin } = runLimits(ctx, started);
+  const native = localSession(ctx);
+  meta.native_session_dir = native.dir;
+  meta.native_session_file = native.file;
+  writeMeta();
+  const syncNative = () => {
+    if (!meta.session_id) return;
+    for (const name of fs.readdirSync(native.dir)) {
+      if (!name.endsWith('.jsonl')) continue;
+      const file = path.join(native.dir, name);
+      try { if (JSON.parse(fs.readFileSync(file, 'utf8').split('\n')[0]).id === meta.session_id) { meta.native_session_file = file; break; } } catch { /* 会话写入中 */ }
+    }
+    writeMeta();
+  };
   const event = eventWriter(dir);
   for (const file of ['events.jsonl', 'pi.jsonl', 'stderr.log']) fs.writeFileSync(path.join(dir, file), '');
   const errors = [], warnings = [], notes = [];
@@ -264,8 +305,9 @@ async function piSession(run, schema, access) {
     if (Date.now() >= deadline) { meta.status = 'timeout'; return null; }
     // 格式修复用同一个会话，不开任何工具。
     const current = repairing ? 'none' : access;
-    const out = await runPi({ agent, args: piArgs({ model, effort, access: current, session: meta.session_id, name: meta.title || `foreman ${ctx.kind}` }),
+    const out = await runPi({ agent, args: piArgs({ model, effort, access: current, session: meta.native_session_file, sessionDir: native.dir, name: meta.title || `foreman ${ctx.kind}` }),
       cwd, access: current, prompt: nextPrompt, runDir: dir, onEvent: translate, timeoutMs: deadline - Date.now(), stallMin });
+    syncNative();
     errors.push(...out.errors);
     observed.questions.push(...out.questions);
     if (!repairing) observed.messages = out.messages;
@@ -284,6 +326,9 @@ async function piSession(run, schema, access) {
   if (meta.status === 'cancelled') errors.push(M.runCancelled(model));
   if (meta.status === 'stalled') errors.push(M.stalled(stallMin));
   if (meta.status === 'failed' && errors.some((e) => /rate.?limit|concurrency|too many requests|\b429\b/i.test(e))) notes.push(M.rateLimited(model, 'pi'));
+  if (meta.status === 'failed' && errors.some((e) => /^400\s+event:\s*error\s+data:\s*\{\s*\}\s*$/.test(e))) {
+    notes.push(M.piOpaque400(model, meta.id, meta.session_id, dir));
+  }
   // pi 遇到模型不支持的档位不报错，会悄悄换一档。
   if (effort != null && effort !== 'default' && thinkingLevel && thinkingLevel !== effort) notes.push(M.piEffortChanged(effort, thinkingLevel));
   fs.writeFileSync(path.join(dir, 'last-message.txt'), last);
@@ -317,6 +362,9 @@ async function checkPiAgent(name, agent, efforts = [], catalog = () => piCatalog
   const version = await call(['--version']);
   if (version.status !== 'done') { out.error = failed(version); out.fix = M.fixPiMissing(name); return finish(); }
   out.version = version.stdout.trim();
+  out.verified_versions = ['1.2.0'];
+  out.version_verified = /^(?:v)?1\.2\.0$/.test(out.version);
+  out.version_warning = out.version_verified ? null : `pi ${out.version} 尚未验证；当前已验证 1.2.0，继续执行兼容性检查。`;
   const cat = catalog();
   if (!cat.ok) { out.error = cat.error; out.fix = M.fixPiCatalog(name, cat.error); return finish(); }
   const listed = cat.models.find((m) => m.id === agent.model);

@@ -30,3 +30,33 @@ SKILL.md 里只留了决策流程和常用命令。排查环境、帮用户选�
 - `isolation`、`run_access`：opencode 和 pi 做执行时，写明没有系统沙箱（`tools`）和这次的权限档位。
 - `generated_images`：这一轮生成的图片原文件。
 - `review_scope`：审查的范围、文件数和指纹。
+
+## 内置 Sol 执行与主控记录
+
+当用户选择内置执行时，主控直接使用 Codex 提供的内置子智能体工具创建 `gpt-6.1-sol` 任务，并记录工具实际返回的 agent id。`levels.run = "codex host"` 只把执行交回主控，CLI 不会自动创建内置子智能体。内置任务由主控使用宿主工具等待、验收或取消；本 CLI 不能驱动、取消或实时监测内置 agent。
+
+主控把下列 JSON 保存为 `E:\task.json`，一条命令即可保存或更新同一 `task_id`：
+
+```json
+{
+  "task_id": "implement-parser",
+  "agent_id": "替换为宿主工具返回的真实 agent id",
+  "model": "gpt-6.1-sol",
+  "scope": ["src/parser.mjs"],
+  "artifacts": [],
+  "tests": [],
+  "acceptance": ["主控检查 diff 并验证解析边界"],
+  "status": "assigned",
+  "status_source": "主控依据宿主派发工具返回结果明确报告"
+}
+```
+
+```powershell
+node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json"
+```
+
+`<cli>` 为 `skills/codex-foreman/scripts/cli.mjs` 的绝对路径。记录写入主工作区 `.codex/foreman/native-tasks/<task_id>.json`，独立于外部 CLI 的 runs。更新时重新提交完整 JSON；完成后填写实际产物、测试结果、验收标准及状态依据。`status` 允许 assigned、running、completed、failed、cancelled、blocked；所有状态均由主控明确报告，时间戳只是记录时间。不会把本地记录当作实时状态，也不推算内置任务 token 或费用。输入校验、临时文件原子替换和目录链接检查用于防止损坏或路径穿越；不提供并发合并，同任务同时更新以最后一次成功替换为准。
+
+## version
+
+`node "<cli>" version --workspace "<主工作区>"` 输出版本与来源 JSON。安装副本读取 `.foreman-install.json`，源码调用读取 package.json；config 输出也包含 version。它不联网检查更新。

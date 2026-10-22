@@ -5,7 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { sandbox, baseConfig, piAgent, taskArgs, output, failed, read, seedRun, ROOT, PI, MESSAGES } from './helpers.mjs';
+import { sandbox, baseConfig, piAgent, taskArgs, output, failed, read, seedRun, poll, write, ROOT, PI, MESSAGES } from './helpers.mjs';
 import { report, discussion } from './fixtures/reports.mjs';
 const M = MESSAGES.zh;
 const SCRIPTS = path.join(ROOT, 'skills/codex-foreman/scripts');
@@ -57,7 +57,7 @@ test('讨论：只读工具和守卫、隔离参数、事件翻译、用量和�
   assert.deepEqual(r.report, discussion);
   assert.equal(r.agent_type, 'pi cli');
   const call = runs(s)[0];
-  assert.deepEqual(call.args, ['--mode', 'json', '--model', 'fake/model', ...ISOLATE, '-e', GUARD, '--thinking', 'high', '--tools', 'read,grep,find,ls', '--name', '合成讨论']);
+  assert.deepEqual(call.args, ['--mode', 'json', '--model', 'fake/model', ...ISOLATE, '-e', GUARD, '--thinking', 'high', '--tools', 'read,grep,find,ls', '--session-dir', path.join(r.run_dir, 'pi-sessions'), '--name', '合成讨论']);
   assert.deepEqual(policies(guardFile), [{ root: h.cwd, access: 'read' }]);
   assert.ok(call.stdin.startsWith('合成议题'));
   assert.ok(call.stdin.includes('不能运行命令'));
@@ -74,7 +74,8 @@ test('讨论：只读工具和守卫、隔离参数、事件翻译、用量和�
   assert.ok(logged.includes('"type":"tool_execution_end"'));
   const resumed = output(await h.bridge(['resume', '--run', r.run_id, '--brief', '-', '--level', 'complex'], { env: s.env, input: '第二轮' }));
   assert.ok(runs(s)[1].args.includes('--session'));
-  assert.equal(runs(s)[1].args[runs(s)[1].args.indexOf('--session') + 1], 'synthetic-pi-session');
+  assert.equal(runs(s)[1].args[runs(s)[1].args.indexOf('--session') + 1], path.join(resumed.run_dir, 'pi-sessions', 'synthetic-pi-session.jsonl'));
+  assert.equal(JSON.parse(read(path.join(resumed.run_dir, 'meta.json'))).native_session_file, path.join(resumed.run_dir, 'pi-sessions', 'synthetic-pi-session.jsonl'));
   assert.ok(runs(s)[1].stdin.includes(M.opencodeResumeFooter));
   assert.equal(resumed.status, 'done');
 });
@@ -136,10 +137,27 @@ test('执行报告不合格时，同一会话、不开任何工具修复一次�
   const [first, second] = runs(s);
   assert.ok(first.args.includes('--tools'));
   assert.ok(second.args.includes('--no-tools'));
-  assert.equal(second.args[second.args.indexOf('--session') + 1], 'synthetic-pi-session');
+  assert.equal(second.args[second.args.indexOf('--session') + 1], path.join(r.run_dir, 'pi-sessions', 'synthetic-pi-session.jsonl'));
   assert.deepEqual(policies(guardFile).map((p) => p.access), ['edit', 'none']);
   assert.equal(r.usage.output_tokens, 10);
   assert.equal(r.cost_usd, 0.5);
+});
+
+test('空详情 HTTP 400 保留原错并给出可复现诊断，不重试或误判额度', async (t) => {
+  const h = sandbox(t);
+  configure(h, {}, (c) => { c.levels.discuss.complex = [{ agent: 'pi', effort: 'high' }]; });
+  const error = '400 event: error\ndata: {}\n\n';
+  const s = h.scenario({ stop_reason: 'error', error_message: error });
+  const r = output(await h.bridge(taskArgs(h, 'discuss', ['--agent', 'pi']), { env: s.env, input: '议题' }), 1);
+  assert.equal(r.status, 'failed');
+  assert.deepEqual(r.errors, [error]);
+  assert.equal(r.effort, 'high');
+  assert.equal(runs(s).length, 1);
+  assert.ok(r.notes.some(n => n.includes('HTTP 400') && n.includes(r.run_id) && n.includes(r.session_id) && n.includes('pi.jsonl') && n.includes('resume')));
+  assert.ok(!r.notes.some(n => /额度耗尽|限流（429）/.test(n)));
+  const ordinary = h.scenario({ stop_reason: 'error', error_message: '400 invalid tool schema' });
+  const other = output(await h.bridge(taskArgs(h, 'discuss', ['--agent', 'pi']), { env: ordinary.env, input: '议题' }), 1);
+  assert.ok(!other.notes.some(n => n.includes('HTTP 400')));
 });
 
 test('出错、限流、截断、自动重试和推理强度被 pi 改掉', async (t) => {
@@ -273,4 +291,40 @@ test('流式输出期间定期写进度，status 显示思考或回答了多少�
   assert.equal((await h.bridge(['watch', '--run', r.run_id])).code, 0);
   seedRun(h, '20000101-thinking', { agent: 'pi', agent_type: 'pi cli', status: 'running', pid: process.pid }, null, [{ type: 'pi.progress', phase: 'thinking', total_chars: 42 }]);
   assert.equal(output(await h.bridge(['status', '--run', '20000101-thinking'])).activity.step, M.stepApiThinking(42));
+});
+
+
+test('旧 pi 全局会话续接复制到工作区，本轮与父记录相互独立', async (t) => {
+  const h = sandbox(t); configure(h, {}, (c) => { c.levels.discuss.complex = [{ agent: 'pi', effort: 'high' }]; });
+  const sid = 'legacy-session';
+  const old = path.join(h.home, '.pi', 'agent', 'sessions', 'legacy-cwd', `${sid}.jsonl`);
+  fs.mkdirSync(path.dirname(old), { recursive: true });
+  const original = JSON.stringify({ type: 'session', id: sid, cwd: h.cwd }) + '\n';
+  fs.writeFileSync(old, original);
+  seedRun(h, '20200101-000000-old1', { agent: 'pi', agent_type: 'pi cli', kind: 'discuss', session_id: sid, model: 'fake/model' });
+  const s = h.scenario();
+  const r = output(await h.bridge(['resume', '--run', '20200101-000000-old1', '--brief', '-', '--level', 'complex'], { env: s.env, input: '继续' }));
+  const meta = JSON.parse(read(path.join(r.run_dir, 'meta.json')));
+  assert.ok(meta.native_session_file.startsWith(r.run_dir));
+  assert.equal(read(old), original);
+  assert.ok(fs.existsSync(meta.native_session_file));
+  assert.equal(r.session_id, sid);
+});
+
+
+test('纯 pi 组 await-busy 等到真正结束，停用排队检测仍报告运行中', async (t) => {
+  const h = sandbox(t); configure(h, {}, (c) => { c.levels.discuss.complex = [{ agent: 'pi', effort: 'high' }]; c.dispatch.busy_ask_min = 0; });
+  const gate = path.join(h.home, 'pi-gate');
+  const s = h.scenario({ steps: [{ wait_for: gate }] });
+  const child = h.startBridge(taskArgs(h, 'discuss', ['--agent', 'pi', '--group', 'pi-only']), { env: s.env, input: '等待' });
+  await h.running((m) => m.agent === 'pi');
+  const disabled = output(await h.bridge(['await-busy', '--group', 'pi-only']));
+  assert.equal(disabled.done, false); assert.equal(disabled.all_done, false); assert.equal(disabled.unmonitored_running.length, 1);
+  const waiter = h.startBridge(['await-busy', '--group', 'pi-only', '--after', '0.001']);
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const pending = await Promise.race([waiter.done.then(() => false), new Promise((resolve) => setTimeout(() => resolve(true), 100))]);
+  assert.equal(pending, true);
+  write(gate, 'release'); await child.done;
+  const result = output(await waiter.done);
+  assert.equal(result.done, true); assert.equal(result.all_done, true); assert.deepEqual(result.running, []);
 });

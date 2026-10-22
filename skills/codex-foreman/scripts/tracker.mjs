@@ -13,6 +13,11 @@ const SNAPSHOT_EXCLUDES = [
 
 function makeTracker(runDir, cwd, track) {
   const gitDir = path.join(runDir, '.shadow');
+  const recordsRoot = path.dirname(path.resolve(runDir));
+  const isRecord = (file) => {
+    const relative = path.relative(recordsRoot, path.resolve(cwd, file));
+    return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+  };
   const base = [
     '--git-dir', gitDir, '--work-tree', cwd, '--literal-pathspecs',
     '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', '-c', 'core.quotepath=false',
@@ -36,7 +41,7 @@ function makeTracker(runDir, cwd, track) {
     const files = [...new Set([
       ...git(['ls-files', '-z', '-o', '--exclude-standard']).split('\0').filter(Boolean),
       ...(track.length ? git(['ls-files', '-z', '-o', '--', ...track]).split('\0').filter(Boolean) : []),
-    ])];
+    ])].filter((file) => !isRecord(file));
     if (files.length > MAX_SNAPSHOT_FILES) throw new Error(M.tooManyFiles(files.length, MAX_SNAPSHOT_FILES));
     const small = [];
     const large = {};

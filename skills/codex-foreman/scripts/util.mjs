@@ -113,13 +113,24 @@ function isGitRepo(cwd) {
 }
 
 function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 function killTree(pid) {
-  if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
-  // codex 以独立进程组启动，负 pid 连同它起的子进程一起结束。
-  else try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch { /* 已退出 */ } }
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  if (!pidAlive(pid)) return true;
+  if (process.platform === 'win32') {
+    const r = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true });
+    return !r.error && r.status === 0;
+  }
+  try { process.kill(-pid, 'SIGTERM'); return true; }
+  catch { try { process.kill(pid, 'SIGTERM'); return true; } catch { return !pidAlive(pid); } }
+}
+function writeJsonAtomic(file, value) {
+  const temp = `${file}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  try { fs.writeFileSync(temp, JSON.stringify(value, null, 2)); replaceFile(temp, file); }
+  finally { fs.rmSync(temp, { force: true }); }
 }
 
 // ---------- 改动追踪 ----------
@@ -302,4 +313,4 @@ function wrapWidth(s, width) {
   return lines;
 }
 
-export { replaceFile, HERE, LANGUAGE, M, notice, isObject, readJson, die, need, resolveDir, readBrief, MAX_MATERIAL_CHARS, readAttachments, focusFiles, binCommand, pathCommand, npmEntry, isGitRepo, pidAlive, killTree, relativePath, pathKey, RECONNECT, isReconnect, sleep, clip, oneLine, plainCommand, isAscii, modelOf, whoOf, agentTypeOf, looksLikeQuestion, looksLikeInputPrompt, looksLikeFinalQuestion, needsDecision, closestMatches, charWidth, textWidth, fitWidth, wrapWidth };
+export { writeJsonAtomic, replaceFile, HERE, LANGUAGE, M, notice, isObject, readJson, die, need, resolveDir, readBrief, MAX_MATERIAL_CHARS, readAttachments, focusFiles, binCommand, pathCommand, npmEntry, isGitRepo, pidAlive, killTree, relativePath, pathKey, RECONNECT, isReconnect, sleep, clip, oneLine, plainCommand, isAscii, modelOf, whoOf, agentTypeOf, looksLikeQuestion, looksLikeInputPrompt, looksLikeFinalQuestion, needsDecision, closestMatches, charWidth, textWidth, fitWidth, wrapWidth };

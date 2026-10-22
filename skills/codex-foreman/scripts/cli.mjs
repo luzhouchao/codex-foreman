@@ -10,12 +10,14 @@ import { adapters } from './adapters/index.mjs';
 import { computeReviewScope } from './review-scope.mjs';
 import { cmdWatch } from './watch.mjs';
 import { cmdStatus, cmdCancel, cmdAwaitBusy } from './status.mjs';
+import { cmdNativeRecord } from './native-records.mjs';
 import { M, die, need, resolveDir, readBrief, isGitRepo, isAscii, agentTypeOf, closestMatches } from './util.mjs';
 
 // 先加载配置，再迁移记录和重写启动器；这些步骤仍在解析参数之前完成。
 const load = (cwd) => loadConfig(cwd, adapters);
+const { cmd, opts } = parseArgs(process.argv.slice(2));
 const CONFIG = load(null);
-initializeRecords(CONFIG);
+initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
@@ -113,6 +115,7 @@ function cmdConfig(o) {
   const shown = structuredClone(effective);
   for (const agent of Object.values(shown.agents)) if (agent.api_key) agent.api_key = M.keyHidden;
   process.stdout.write(JSON.stringify({
+    version: versionInfo(),
     user_config: USER_CONFIG,
     loaded_from: sources,
     effective: shown,
@@ -126,6 +129,16 @@ function cmdConfig(o) {
     environment: detectEnvironment(adapters, effective.agents),
     summary: buildSummary(effective, adapters),
   }, null, 2) + '\n');
+}
+
+function versionInfo() {
+  for (const [relative, source] of [['../.foreman-install.json', 'installed'], ['../../../package.json', 'source']]) {
+    try {
+      const data = JSON.parse(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'));
+      if (typeof data.version === 'string' && (source === 'installed' || data.name === 'codex-foreman')) return { version: data.version, source };
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  return { version: null, source: 'legacy' };
 }
 
 // 所有协作方都报告，仅被等级引用的协作方影响总体结果。
@@ -211,9 +224,8 @@ async function cmdModels() {
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
 }
 
-const { cmd, opts } = parseArgs(process.argv.slice(2));
 // 新建任务组时组名只用 ASCII：实时查看要把它写进终端命令，桌面版的终端面板只接受 ASCII 命令。
 if (['run', 'discuss', 'resume'].includes(cmd) && opts.group != null && !/^[A-Za-z0-9._-]{1,64}$/.test(opts.group)) die(M.badGroupName(opts.group));
-const commands = { run: cmdRun, discuss: cmdDiscuss, resume: cmdResume, review: cmdReview, status: (o) => cmdStatus(o, (meta) => adapters[agentTypeOf(meta)]?.stats?.(meta.session_id, meta.started_at)), watch: (o) => cmdWatch(o, load), config: cmdConfig, check: cmdCheck, models: cmdModels, cancel: cmdCancel, 'await-busy': (o) => cmdAwaitBusy(o, CONFIG) };
+const commands = { run: cmdRun, discuss: cmdDiscuss, resume: cmdResume, review: cmdReview, status: (o) => cmdStatus(o, (meta) => adapters[agentTypeOf(meta)]?.stats?.(meta.session_id, meta.started_at)), watch: (o) => cmdWatch(o, load), config: cmdConfig, check: cmdCheck, models: cmdModels, cancel: cmdCancel, 'await-busy': (o) => cmdAwaitBusy(o, CONFIG), 'native-record': (o) => process.stdout.write(JSON.stringify(cmdNativeRecord(o), null, 2) + '\n'), version: () => process.stdout.write(JSON.stringify(versionInfo(), null, 2) + '\n') };
 if (!commands[cmd]) die(M.usage);
 await commands[cmd](opts);

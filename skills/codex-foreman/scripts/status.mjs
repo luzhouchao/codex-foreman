@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { RUNS_ROOT, CANCEL_FILE, UNFINISHED_STATUSES, listRuns, findRun, readMeta, isRunning, runEnd, runOutcome, groupRuns, groupSummary, describeActivity } from './records.mjs';
-import { M, die, need, pidAlive, killTree, sleep, modelOf, whoOf, agentTypeOf } from './util.mjs';
+import { M, die, need, pidAlive, killTree, writeJsonAtomic, sleep, modelOf, whoOf, agentTypeOf } from './util.mjs';
 
 function cmdStatus(o, sessionStats) {
   if (o.run && o.group == null) {
@@ -22,7 +22,8 @@ function cmdStatus(o, sessionStats) {
     const m = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
     if (m.status === 'running' && !pidAlive(m.pid)) m.status = 'interrupted';
     const mins = ((runEnd(dir, m) - Date.parse(m.started_at)) / 60000).toFixed(1);
-    const { result: r, blocked } = runOutcome({ dir, meta: m });
+    const { result: r, blocked, status: outcomeStatus } = runOutcome({ dir, meta: m });
+    m.status = outcomeStatus;
     const label = blocked ? `? ${M.statusName(m.status === 'needs_input' ? 'needs_input' : 'blocked')}` : m.status;
     const status = blocked && process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[33m${label}\x1b[0m` : label;
     let row = `${rid}  ${m.mode.padEnd(6)}  ${status.padEnd(11)}  ${(m.level || '-').padEnd(7)}  ${whoOf(m)}  ${mins.padStart(6)}min  ${m.group != null ? M.statusGroup(m.group) : ''}${m.round ? M.statusRound(m.round) : ''}${m.title || ''}  @ ${m.cwd}`;
@@ -56,7 +57,7 @@ async function cmdCancel(o) {
     if (!UNFINISHED_STATUSES.includes(status)) { print({ ok: false, status }); return; }
     const m = readMeta(run.dir) || run.meta;
     m.dismissed_at = new Date().toISOString();
-    fs.writeFileSync(path.join(run.dir, 'meta.json'), JSON.stringify(m, null, 2));
+    writeJsonAtomic(path.join(run.dir, 'meta.json'), m);
     print({ ok: true, status, dismissed: true });
     return;
   }
@@ -64,12 +65,19 @@ async function cmdCancel(o) {
   for (let i = 0; i < 20; i++) {
     await sleep(500);
     const m = readMeta(run.dir);
-    if (!isRunning(m)) { print({ ok: true, status: m?.status }); return; }
+    if (!pidAlive(run.meta.pid)) {
+      if (m?.status !== 'running') { print({ ok: true, status: m?.status }); return; }
+      break;
+    }
   }
-  killTree(run.meta.pid);
+  const killed = killTree(run.meta.pid);
+  for (let i = 0; i < 20 && pidAlive(run.meta.pid); i++) await sleep(100);
+  if (pidAlive(run.meta.pid)) { print({ ok: false, status: 'running', cancel_requested: true, error: killed ? '进程尚未退出，取消结果未确认' : '终止进程失败' }); process.exitCode = 1; return; }
   const m = readMeta(run.dir) || run.meta;
+  const resultFile = path.join(run.dir, 'result.json');
+  if (fs.existsSync(resultFile)) { const result = JSON.parse(fs.readFileSync(resultFile, 'utf8')); m.status = result.status; m.ended_at ||= new Date().toISOString(); writeJsonAtomic(path.join(run.dir, 'meta.json'), m); print({ ok: true, status: m.status }); return; }
   Object.assign(m, { status: 'cancelled', ended_at: new Date().toISOString() });
-  fs.writeFileSync(path.join(run.dir, 'meta.json'), JSON.stringify(m, null, 2));
+  writeJsonAtomic(path.join(run.dir, 'meta.json'), m);
   print({ ok: true, status: 'cancelled', forced: true });
 }
 
@@ -104,21 +112,25 @@ async function cmdAwaitBusy(o, config) {
   if (o.after != null && !(Number(o.after) > 0)) die(M.badAfter(config.dispatch.busy_ask_min));
   const after = Number(o.after ?? config.dispatch.busy_ask_min);
   const print = (x) => process.stdout.write(`${JSON.stringify(x, null, 2)}\n`);
-  if (!(after > 0)) { print({ busy: [], running: [], done: true, disabled: true }); return; }
   const pick = () => (o.group != null ? groupRuns(o.group, Date.now() - 86400000) : [findRun(o.run)]);
+  if (!(after > 0)) { const running = pick().filter((run) => isRunning(run.meta)); print({ busy: [], running: running.map((r) => r.id), done: !running.length, all_done: !running.length, disabled: true, queue_monitor_scope: 'api', unmonitored_running: running.filter((r) => ['pi cli', 'opencode cli'].includes(agentTypeOf(r.meta))).map((r) => r.id) }); return; }
   // 刚派出的任务可能还没登记，最多等 30 秒
   for (let waited = 0; o.group != null && !pick().length; waited += 1000) {
-    if (waited >= 30000) { print({ busy: [], running: [], done: true }); return; }
+    if (waited >= 30000) { print({ busy: [], running: [], done: true, all_done: true, queue_monitor_scope: 'api', unmonitored_running: [] }); return; }
     await sleep(1000);
   }
   for (;;) {
-    const running = pick().filter((run) => isRunning(run.meta) && !['opencode cli', 'pi cli'].includes(agentTypeOf(run.meta)));
-    const busy = running.map((run) => ({ run, s: queuedSeconds(run.dir) })).filter((x) => x.s != null && x.s >= after * 60);
+    const running = pick().filter((run) => isRunning(run.meta));
+    const monitored = running.filter((run) => !['opencode cli', 'pi cli'].includes(agentTypeOf(run.meta)));
+    const busy = monitored.map((run) => ({ run, s: queuedSeconds(run.dir) })).filter((x) => x.s != null && x.s >= after * 60);
     if (busy.length || !running.length) {
       print({
         busy: busy.map(({ run, s }) => ({ run_id: run.id, agent: run.meta.agent, model: modelOf(run.meta), queued_min: Number((s / 60).toFixed(1)) })),
         running: running.map((run) => run.id),
         done: !running.length,
+        all_done: !running.length,
+        queue_monitor_scope: 'api',
+        unmonitored_running: running.filter((run) => !monitored.includes(run)).map((run) => run.id),
       });
       return;
     }

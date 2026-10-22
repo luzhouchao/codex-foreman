@@ -237,5 +237,5 @@ test('同组多方并发，await-busy 列出超过阈值的 API 参与方', asyn
   const settled = await Promise.all(handles.map((p) => p.done));
   for (const r of settled) assert.equal(output(r).group, 'discussion-group');
   const finished = output(await h.bridge(['await-busy', '--group', 'discussion-group', '--after', '0.001']));
-  assert.deepEqual(finished, { busy: [], running: [], done: true });
+  assert.deepEqual(finished, { busy: [], running: [], done: true, all_done: true, queue_monitor_scope: 'api', unmonitored_running: [] });
 });

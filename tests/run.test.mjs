@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandbox, taskArgs, output, failed, json, read, write, poll, baseConfig, seedRun, MESSAGES } from './helpers.mjs';
+import { sandbox, taskArgs, output, failed, json, read, write, poll, baseConfig, seedRun, ROOT, MESSAGES } from './helpers.mjs';
 import { report, usage, sessionStats, command } from './fixtures/reports.mjs';
 const M = MESSAGES.zh;
 
@@ -182,4 +182,82 @@ test('Codex 的命令因为沙箱起不来时，notes 里说明这不是任务�
   const ok = h.scenario({ steps: [{ event: { type: 'item.completed', item: { id: 'cmd-2', type: 'command_execution', command: 'grep sandbox', exit_code: 0, aggregated_output: 'sandbox failed in docs' } } }] });
   const r2 = output(await h.bridge(taskArgs(h), { env: ok.env }));
   assert.ok(!r2.notes.some((n) => n.startsWith(M.codexSandboxFailed('').slice(0, 10))));
+});
+
+
+test('取消失败时不发布 cancelled；已发布结果与未退出进程保持一致', async (t) => {
+  if (process.platform !== 'win32') return;
+  const h = sandbox(t);
+  const hold = path.join(h.home, 'hold.mjs');
+  write(hold, 'setInterval(() => {}, 1000);');
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [hold], { windowsHide: true, stdio: 'ignore' });
+  t.after(() => { try { child.kill(); } catch {} });
+  const dir = seedRun(h, 'uncancellable', { status: 'running', pid: child.pid, ended_at: null });
+  const r = output(await h.bridge(['cancel', '--run', 'uncancellable'], { env: { PATH: '' } }), 1);
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 'running');
+  assert.equal(json(path.join(dir, 'meta.json')).status, 'running');
+  assert.equal(fs.existsSync(path.join(dir, 'result.json')), false);
+  write(path.join(dir, 'meta.json'), { ...json(path.join(dir, 'meta.json')), status: 'done' });
+  write(path.join(dir, 'result.json'), { status: 'done', exit_code: 0 });
+  const finished = output(await h.bridge(['cancel', '--run', 'uncancellable']));
+  assert.equal(finished.status, 'done');
+  assert.equal(finished.ok, false);
+  assert.equal(json(path.join(dir, 'result.json')).status, 'done');
+});
+
+
+test('finishRun 并发查询只能读到完整 JSON，结果先于终态元数据发布', async (t) => {
+  const h = sandbox(t);
+  const dir = path.join(h.home, 'atomic-run'); fs.mkdirSync(dir);
+  const { pathToFileURL } = await import('node:url');
+  const writer = path.join(h.home, 'atomic-writer.mjs');
+  const runner = pathToFileURL(path.join(ROOT, 'skills/codex-foreman/scripts/runner.mjs')).href;
+  const util = pathToFileURL(path.join(ROOT, 'skills/codex-foreman/scripts/util.mjs')).href;
+  write(writer, `import { finishRun } from ${JSON.stringify(runner)};
+import { writeJsonAtomic } from ${JSON.stringify(util)};
+const dir = ${JSON.stringify(dir)};
+const run = { ctx: { kind: 'exec', dir }, meta: {}, writeMeta() { writeJsonAtomic(dir + '/meta.json', { status: 'done', generation: run.meta.generation }); } };
+for (let i = 0; i < 30; i++) { run.meta.generation = i; finishRun(run, { mode: 'run', kind: 'exec', status: 'done', generation: i, errors: [], notes: [], warnings: [], payload: 'x'.repeat(200000), exit_code: 0 }); await new Promise(r => setTimeout(r, 5)); }
+`);
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [writer], { windowsHide: true, stdio: 'ignore' });
+  let completed = false; const done = new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', (code) => { completed = true; code === 0 ? resolve() : reject(new Error(`writer exit ${code}`)); }); });
+  t.after(() => { if (!completed) child.kill(); });
+  let observations = 0;
+  while (!completed) {
+    for (const name of ['meta.json', 'result.json']) {
+      const file = path.join(dir, name);
+      if (fs.existsSync(file)) { const data = json(file); assert.equal(data.status, 'done'); observations++; }
+    }
+    if (fs.existsSync(path.join(dir, 'meta.json'))) {
+      const meta = json(path.join(dir, 'meta.json')), result = json(path.join(dir, 'result.json'));
+      assert.ok(result.generation >= meta.generation);
+    }
+    await new Promise(r => setTimeout(r, 1));
+  }
+  await done; assert.ok(observations > 0);
+  assert.equal(json(path.join(dir, 'result.json')).generation, 29);
+});
+
+
+test('结果已原子发布而元数据未更新时，从结果恢复终态', async (t) => {
+  const h = sandbox(t);
+  const dir = seedRun(h, '20200101-000000-crsh', { status: 'running', pid: 0 }, { status: 'done', report: { status: 'completed' } });
+  const { pathToFileURL } = await import('node:url');
+  const { runOutcome } = await import(pathToFileURL(path.join(ROOT, 'skills/codex-foreman/scripts/records.mjs')).href);
+  const outcome = runOutcome({ dir, meta: json(path.join(dir, 'meta.json')) });
+  assert.equal(outcome.running, false); assert.equal(outcome.status, 'done'); assert.equal(outcome.ok, true);
+});
+
+
+test('合法未来 run ID 与无效历史记录都不让任务登记等待时钟', async (t) => {
+  const h = sandbox(t);
+  seedRun(h, '20990101-000000-zzzz');
+  seedRun(h, '99999999-999999-zzzz');
+  const s = h.scenario({ last_message: report });
+  const r = output(await h.bridge(taskArgs(h), { env: s.env, input: '时钟回拨登记' }));
+  assert.ok(r.run_id > '20990101-000000-zzzz');
+  assert.ok(r.run_id.startsWith('20990101-000001-'));
 });

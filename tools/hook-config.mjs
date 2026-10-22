@@ -18,10 +18,25 @@ export function buildHooks(skill, node = process.execPath, platform = process.pl
 }
 export function mergeHooks(existing, added) {
   if (!existing || typeof existing !== 'object' || Array.isArray(existing)) throw new Error('现有 hooks.json 必须是对象');
+  if (existing.hooks !== undefined && (!existing.hooks || typeof existing.hooks !== 'object' || Array.isArray(existing.hooks))) throw new Error('现有 hooks 字段必须是对象');
   const hooks = { ...(existing.hooks || {}) };
   for (const [event, groups] of Object.entries(added.hooks)) {
     if (hooks[event] !== undefined && !Array.isArray(hooks[event])) throw new Error(`现有 ${event} 格式无效`);
-    hooks[event] = [...(hooks[event] || [])];
+    const names = event === 'SessionStart' ? ['session-start.mjs'] : event === 'PreToolUse' ? ['pre-tool-use.mjs'] : [];
+    const own = (hook) => {
+      if (hook?.type !== 'command' || typeof hook.command !== 'string') return false;
+      let command = hook.command;
+      const encoded = command.match(/-EncodedCommand\s+([A-Za-z0-9+/=]+)/i);
+      if (encoded) command = Buffer.from(encoded[1], 'base64').toString('utf16le');
+      return names.some((name) => command.replaceAll('\\', '/').includes(`/codex-foreman/hooks/${name}`));
+    };
+    // Remove only our command, including from a group shared with user hooks.
+    hooks[event] = (hooks[event] || []).map((group) => {
+      if (!Array.isArray(group?.hooks)) return group;
+      const remaining = group.hooks.filter((hook) => !own(hook));
+      if (remaining.length === group.hooks.length) return group;
+      return remaining.length ? { ...group, hooks: remaining } : null;
+    }).filter(Boolean);
     for (const group of groups) {
       if (!hooks[event].some((g) => JSON.stringify(g) === JSON.stringify(group))) hooks[event].push(group);
     }

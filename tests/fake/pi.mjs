@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { setup, replay, finish } from './common.mjs';
 import { discussion } from '../fixtures/reports.mjs';
 
@@ -22,7 +23,14 @@ else if (operation === 'list-models') {
   else { process.stderr.write('synthetic: no model catalog\n'); process.exitCode = 1; }
 } else if (operation === 'run') {
   if (s.guard_file) fs.appendFileSync(s.guard_file, `${process.env.CODEX_FOREMAN_PI_GUARD}\n`);
-  const sessionId = args.includes('--session') ? args[args.indexOf('--session') + 1] : s.session_id || 'synthetic-pi-session';
+  const previous = args.includes('--session') ? args[args.indexOf('--session') + 1] : null;
+  const sessionId = previous ? JSON.parse(fs.readFileSync(previous, 'utf8').split('\n')[0]).id : s.session_id || 'synthetic-pi-session';
+  if (!args.includes('--no-session')) {
+    const dir = args[args.indexOf('--session-dir') + 1];
+    fs.mkdirSync(dir, { recursive: true });
+    const file = previous || path.join(dir, `${sessionId}.jsonl`);
+    fs.appendFileSync(file, JSON.stringify({ type: 'session', id: sessionId, cwd: process.cwd() }) + '\n');
+  }
   if (!args.includes('--no-session')) emit({ type: 'session', version: 3, id: sessionId, cwd: process.cwd() });
   emit({ type: 'agent_start' });
   if (s.retry_first) {

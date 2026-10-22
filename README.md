@@ -19,7 +19,7 @@ node .\tools\install.mjs
 
 Windows 钩子显式使用 PowerShell 和 Node 绝对路径，兼容路径空格。钩子不递归解析任意包装脚本，也不拦截终端手工输入；它是工作流约束，不是安全沙箱。事件和信任流程见 [Codex 官方 Hooks 文档](https://learn.chatgpt.com/docs/hooks)。
 
-安装器复制技能到 `$CODEX_HOME/skills/codex-foreman`，默认 `~/.codex/skills/codex-foreman`；已有目录时拒绝覆盖。重新打开 Codex 会话后使用 `$codex-foreman`，例如“用 pi 实现这个功能，完成后你检查 diff 并运行测试”。
+安装器复制技能到 `$CODEX_HOME/skills/codex-foreman`，默认 `~/.codex/skills/codex-foreman`；已有目录时默认拒绝覆盖，显式更新使用 `--update`。重新打开 Codex 会话后使用 `$codex-foreman`，例如“用 pi 实现这个功能，完成后你检查 diff 并运行测试”。
 
 也可不安装，直接调用：
 
@@ -31,11 +31,13 @@ node .\skills\codex-foreman\scripts\cli.mjs models
 首次配置默认由当前 Codex 自行处理，不自动选择外部模型。将 `examples/config.pi.json` 中的模型替换为 `models` 返回的真实 `provider/model`，再合并到配置输出标明的用户配置文件。使用 `--agent pi-worker` 可明确指定 pi。opencode 类型写作 `opencode cli`，模型同样使用工具实际返回的标识。
 
 ```powershell
-node .\skills\codex-foreman\scripts\cli.mjs run --cwd E:\your-project --brief E:\task.md --title 实现功能 --level normal --agent pi-worker
-node .\skills\codex-foreman\scripts\cli.mjs status
+node .\skills\codex-foreman\scripts\cli.mjs run --cwd E:\your-project --brief E:\task.md --title 实现功能 --level normal --agent pi-worker --workspace "E:\your-workspace"
+node .\skills\codex-foreman\scripts\cli.mjs status --workspace "E:\your-workspace"
 ```
 
 配置与运行记录独立于 Claude，位于 Codex home 下的 `foreman`。环境变量使用 `CODEX_FOREMAN_CONFIG`、`CODEX_FOREMAN_RUNS_DIR`。主控标识为 `codex host`，可与名为 codex 的外部协作方区分。
+
+要把运行记录保存在主对话工作区，将 `dispatch.runs_dir` 设为 `.codex/foreman/runs`，并在所有 CLI 命令上加 `--workspace "主工作区绝对路径"`（或设置 `CODEX_FOREMAN_WORKSPACE`）。执行任务的 `--cwd` 可以是其他目录。未指定 workspace 时采用 CLI 启动目录。记录包括任务说明、事件、报告、diff 和查看器状态；建议将运行目录加入项目本地 Git 排除规则，避免提交日志。
 
 ## 权限与兼容边界
 
@@ -63,6 +65,53 @@ npm test
 
 将用户配置的 `dispatch.watch` 设为 `"auto"`，Windows 上每次执行、讨论、审查或续接会自动打开独立终端窗口（优先 PowerShell 7，未安装时回退 Windows PowerShell），显示模型、进度、工具活动和结果。同一 Codex 会话、同一个 `--group` 的并发参与方合用一个窗口。默认关闭，按需在用户配置中开启。
 
-按 q 或关闭查看窗口不会取消任务，需停止任务时使用 `cancel --run <id>`。任务结束后窗口保留结果，可直接关闭。恢复手动展示只需设为 `"off"`。窗口启动失败不影响任务；错误写入日志，可用 watch 手动查看。
+按 q 或关闭查看窗口不会取消任务，需停止任务时使用 `cancel --run <id> --workspace "<主对话工作区绝对路径>"`。任务结束后窗口保留结果，可直接关闭。恢复手动展示只需设为 `"off"`。窗口启动失败不影响任务；错误写入日志，可用 watch 手动查看。
 
 此功能由执行器直接触发，不依赖钩子是否已信任。目前自动窗口支持 Windows；Codex 内置终端的自动执行入口尚未接入，其他系统使用手动 watch。
+
+## 内置 Sol 执行与主控记录
+
+当用户选择内置执行时，主控直接使用 Codex 提供的内置子智能体工具创建 `gpt-6.1-sol` 任务，并记录工具实际返回的 agent id。`levels.run = "codex host"` 只把执行交回主控，CLI 不会自动创建内置子智能体。内置任务由主控使用宿主工具等待、验收或取消；本 CLI 不能驱动、取消或实时监测内置 agent。
+
+主控把下列 JSON 保存为 `E:\task.json`，一条命令即可保存或更新同一 `task_id`：
+
+```json
+{
+  "task_id": "implement-parser",
+  "agent_id": "替换为宿主工具返回的真实 agent id",
+  "model": "gpt-6.1-sol",
+  "scope": ["src/parser.mjs"],
+  "artifacts": [],
+  "tests": [],
+  "acceptance": ["主控检查 diff 并验证解析边界"],
+  "status": "assigned",
+  "status_source": "主控依据宿主派发工具返回结果明确报告"
+}
+```
+
+```powershell
+node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json"
+```
+
+`<cli>` 为 `skills/codex-foreman/scripts/cli.mjs` 的绝对路径。记录写入主工作区 `.codex/foreman/native-tasks/<task_id>.json`，独立于外部 CLI 的 runs。更新时重新提交完整 JSON；完成后填写实际产物、测试结果、验收标准及状态依据。`status` 允许 assigned、running、completed、failed、cancelled、blocked；所有状态均由主控明确报告，时间戳只是记录时间。不会把本地记录当作实时状态，也不推算内置任务 token 或费用。输入校验、临时文件原子替换和目录链接检查用于防止损坏或路径穿越；不提供并发合并，同任务同时更新以最后一次成功替换为准。
+
+## 记录保留范围
+
+新建 pi 原生会话随对应 run 保存到主工作区；旧全局 pi 会话保留，续接兼容旧记录，不自动搬迁或删除认证配置。删除主工作区 `.codex/foreman` 只清理该目录中的 Foreman 日志和任务记录，不包含 Codex 原生主会话、子会话，也不代表卸载技能或钩子。当前没有自动清理流程。
+
+讨论可采用主控独立意见加外部中立评议；材料集中给出、按任务选择参与人数、有实质分歧才开第二轮。例如可配置 DeepSeek max、GLM max、MiMo high 参与讨论，并由主控调用内置 gpt-6.1-sol 执行；发行默认仍由主控处理，安装不代表后续外部调用授权。
+
+## 显式更新与回退
+
+在源码仓库内运行以下命令；每个操作沿用当前 CODEX_HOME：
+
+```powershell
+node .\tools\install.mjs --version
+node .\tools\install.mjs --update
+node .\tools\install.mjs --update --hooks
+node .\tools\install.mjs --hooks-only
+node .\tools\install.mjs --rollback <备份ID>
+node .\skills\codex-foreman\scripts\cli.mjs version --workspace "E:\your-workspace"
+```
+
+更新先暂存并备份技能，保留用户配置及日志；失败尝试自动恢复，恢复失败会报告备份位置。返回的 backup 是显式回退所需 ID。无版本标记的既有安装显示 legacy；CLI version 从安装版本标记读取版本，源码调用回退到 package.json。更新自身钩子时保留其他钩子；安装器不写信任记录，仍需用户在 /hooks 审阅。回退时若 hooks.json 在更新后又有改动，会拒绝覆盖，需手动合并。技能目录中的托管程序文件会被替换，修改前应保存自己的程序补丁。
