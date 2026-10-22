@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandbox } from './helpers.mjs';
+import { sandbox, ROOT, write, poll } from './helpers.mjs';
+import { setTimeout as pause } from 'node:timers/promises';
 import { openAutoWatch, windowsLaunchScript, powerShellExecutable } from '../skills/codex-foreman/scripts/auto-watch.mjs';
 
 function fixture(t) {
@@ -61,4 +62,38 @@ test('无组任务分别开窗，特殊字符只作为数据传递', (t) => {
   assert.ok(!script.includes(payload.group));
   assert.match(script, /-WindowStyle Normal/);
   assert.match(script, /-NoExit/);
+});
+
+test('仅讨论及讨论续接自动关闭，执行和审查保留窗口', (t) => {
+  const { ctx, meta } = fixture(t);
+  for (const [mode, kind, autoClose] of [['discuss', 'discuss', true], ['resume', 'discuss', true], ['run', 'exec', false], ['review', 'review', false], ['resume', 'exec', false]]) {
+    let payload;
+    openAutoWatch(ctx, { ...meta, id: `${mode}-${kind}`, group: null, mode, kind }, { platform: 'win32', launch: (p) => { payload = p; } });
+    assert.equal(payload.kind, kind);
+    assert.equal(payload.autoClose, autoClose);
+    assert.equal(windowsLaunchScript(payload).includes('-NoExit'), !autoClose);
+  }
+});
+
+test('自动讨论查看器等待同会话整组结束，自然退出且不取消任务', async (t) => {
+  const h = sandbox(t);
+  const task = (id, status, session = 'test-session') => write(path.join(h.runs, id, 'meta.json'), {
+    id, kind: 'discuss', mode: 'discuss', group: 'discussion', host_session: session,
+    status, pid: process.pid, cwd: h.cwd, started_at: new Date().toISOString(), model: 'synthetic',
+  });
+  task('first', 'running'); task('second', 'running'); task('other-session', 'running', 'other');
+  const lease = path.join(h.runs, 'lease.json');
+  write(lease, { token: 'synthetic' });
+  const ready = path.join(h.runs, 'ready.json');
+  const payload = { lease, token: 'synthetic', ready, root: h.runs, run: 'first', group: 'discussion', session: 'test-session', kind: 'discuss', autoClose: true };
+  const viewer = h.start(path.join(ROOT, 'skills/codex-foreman/scripts/watch-window.mjs'), [Buffer.from(JSON.stringify(payload)).toString('base64')]);
+  await poll(() => fs.existsSync(ready), '查看器启动');
+  task('first', 'done');
+  await pause(6100); // 超过已有的 5 秒组登记稳定期，第二个任务仍在运行。
+  assert.equal(viewer.child.exitCode, null);
+  task('second', 'cancelled');
+  const result = await viewer.done;
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(fs.existsSync(lease), false);
+  for (const id of ['first', 'second', 'other-session']) assert.equal(fs.existsSync(path.join(h.runs, id, 'cancel')), false);
 });

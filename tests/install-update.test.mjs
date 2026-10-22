@@ -21,7 +21,7 @@ test('默认拒绝覆盖，显式更新保留配置/aliases/runs并记录版本'
   assert.throws(() => install(h), /目标已存在/);
   assert.deepEqual(snapshot(h.target), before);
   const update = install({ ...h, update: true });
-  assert.equal(install({ ...h, version: true }).version, '0.3.0');
+  assert.equal(install({ ...h, version: true }).version, JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
   assert.equal(read(path.join(h.target, 'config.json')), 'user-config.json');
   assert.equal(read(path.join(h.target, 'agent-aliases.json')), 'user-agent-aliases.json');
   assert.equal(read(path.join(h.target, 'runs/result.json')), 'keep');

@@ -21,7 +21,8 @@ export function windowsLaunchScript(payload, shell = powerShellExecutable()) {
   const data = Buffer.from(JSON.stringify(payload)).toString('base64');
   const command = `$Host.UI.RawUI.WindowTitle = 'Codex Foreman'; & ${quotePS(process.execPath)} ${quotePS(viewer)} ${quotePS(data)}`;
   // The parent launcher is hidden; only the requested interactive viewer is visible.
-  return `Start-Process -FilePath ${quotePS(shell)} -WindowStyle Normal -ArgumentList @('-NoLogo','-NoProfile','-NoExit','-EncodedCommand','${encoded(command)}') -ErrorAction Stop | Out-Null`;
+  const keepOpen = payload.autoClose ? '' : "'-NoExit',";
+  return `Start-Process -FilePath ${quotePS(shell)} -WindowStyle Normal -ArgumentList @('-NoLogo','-NoProfile',${keepOpen}'-EncodedCommand','${encoded(command)}') -ErrorAction Stop | Out-Null`;
 }
 
 function launchWindows(payload) {
@@ -58,7 +59,8 @@ export function openAutoWatch(ctx, meta, { platform = process.platform, launch =
         fs.rmSync(lease, { force: true });
       }
     }
-    launch({ lease, token, run: meta.id, group: meta.group, root, session: meta.host_session, ready: path.join(ctx.dir, 'viewer-ready.json') });
+    const kind = meta.kind || meta.mode;
+    launch({ lease, token, run: meta.id, group: meta.group, kind, autoClose: kind === 'discuss', root, session: meta.host_session, ready: path.join(ctx.dir, 'viewer-ready.json') });
     return { status: 'requested', lease };
   } catch (error) {
     try { if (JSON.parse(fs.readFileSync(lease)).token === token) fs.rmSync(lease); } catch { /* best effort */ }
