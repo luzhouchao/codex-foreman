@@ -14,7 +14,7 @@ export function viewerProblems(payload) {
 }
 
 export async function holdViewer(problems) {
-  console.log(`\n讨论需要处理，窗口已保留：\n${problems.join('\n')}\n按 Enter 或 q 关闭查看窗口，后台任务不受影响。`);
+  console.log(`\n任务需要处理，窗口已保留：\n${problems.join('\n')}\n按 Enter 或 q 关闭查看窗口，后台任务不受影响。`);
   await new Promise((resolve) => {
     const timer = setInterval(() => {}, 60000);
     const finish = () => {

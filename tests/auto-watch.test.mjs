@@ -83,9 +83,9 @@ test('无组任务分别开窗，特殊字符只作为数据传递', (t) => {
   assert.match(script, /-NoExit/);
 });
 
-test('仅讨论及讨论续接自动关闭，执行和审查保留窗口', (t) => {
+test('讨论、执行及对应续接自动关闭，审查保留窗口', (t) => {
   const { ctx, meta } = fixture(t);
-  for (const [mode, kind, autoClose] of [['discuss', 'discuss', true], ['resume', 'discuss', true], ['run', 'exec', false], ['review', 'review', false], ['resume', 'exec', false]]) {
+  for (const [mode, kind, autoClose] of [['discuss', 'discuss', true], ['resume', 'discuss', true], ['run', 'exec', true], ['review', 'review', false], ['resume', 'exec', true]]) {
     let payload;
     openAutoWatch(ctx, { ...meta, id: `${mode}-${kind}`, group: null, mode, kind }, { platform: 'win32', launch: (p) => { payload = p; } });
     assert.equal(payload.kind, kind);
@@ -116,3 +116,41 @@ test('自动讨论查看器等待同会话整组结束，自然退出且不取�
   assert.equal(fs.existsSync(lease), false);
   for (const id of ['first', 'second', 'other-session']) assert.equal(fs.existsSync(path.join(h.runs, id, 'cancel')), false);
 });
+
+for (const mode of ['run', 'resume']) {
+  test(`自动执行查看器 ${mode} 正常完成后自然退出`, async (t) => {
+    const h = sandbox(t);
+    const dir = path.join(h.runs, 'execution');
+    write(path.join(dir, 'meta.json'), { id: 'execution', mode, kind: 'exec', status: 'done', cwd: h.cwd, started_at: new Date().toISOString(), host_session: 'test-session' });
+    write(path.join(dir, 'result.json'), { status: 'done', needs_decision: false });
+    const lease = path.join(h.runs, 'lease.json');
+    write(lease, { token: 'execution' });
+    const payload = { lease, token: 'execution', ready: path.join(dir, 'ready.json'), root: h.runs, run: 'execution', session: 'test-session', kind: 'exec', autoClose: true };
+    const viewer = h.start(path.join(ROOT, 'skills/codex-foreman/scripts/watch-window.mjs'), [Buffer.from(JSON.stringify(payload)).toString('base64')]);
+    const result = await viewer.done;
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(viewer.stdout, /同组任务正常完成后自动关闭/);
+    assert.equal(fs.existsSync(lease), false);
+    assert.equal(fs.existsSync(path.join(dir, 'cancel')), false);
+  });
+
+  test(`自动执行查看器 ${mode} 异常或需要处理时保留窗口`, async (t) => {
+    await Promise.all(['failed', 'timeout', 'cancelled', 'needs_input', 'needs_decision'].map(async (outcome) => {
+      const h = sandbox(t);
+      const dir = path.join(h.runs, 'execution');
+      const status = outcome === 'needs_decision' ? 'done' : outcome;
+      write(path.join(dir, 'meta.json'), { id: 'execution', mode, kind: 'exec', status, cwd: h.cwd, started_at: new Date().toISOString(), host_session: 'test-session' });
+      write(path.join(dir, 'result.json'), { status, needs_decision: outcome === 'needs_decision', errors: ['execution needs attention'] });
+      const lease = path.join(h.runs, 'lease.json');
+      write(lease, { token: outcome });
+      const payload = { lease, token: outcome, ready: path.join(dir, 'ready.json'), root: h.runs, run: 'execution', session: 'test-session', kind: 'exec', autoClose: true };
+      const viewer = h.start(path.join(ROOT, 'skills/codex-foreman/scripts/watch-window.mjs'), [Buffer.from(JSON.stringify(payload)).toString('base64')]);
+      await poll(() => viewer.stdout.includes('任务需要处理，窗口已保留'), outcome);
+      assert.equal(viewer.child.exitCode, null);
+      assert.match(viewer.stdout, /execution needs attention/);
+      assert.equal(fs.existsSync(path.join(dir, 'cancel')), false);
+      viewer.stop();
+      await viewer.done;
+    }));
+  });
+}

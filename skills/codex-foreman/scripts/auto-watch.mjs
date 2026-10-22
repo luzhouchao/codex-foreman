@@ -60,7 +60,7 @@ export function openAutoWatch(ctx, meta, { platform = process.platform, launch =
       }
     }
     const kind = meta.kind || meta.mode;
-    launch({ lease, token, run: meta.id, group: meta.group, kind, autoClose: kind === 'discuss', root, session: meta.host_session, ready: path.join(ctx.dir, 'viewer-ready.json') });
+    launch({ lease, token, run: meta.id, group: meta.group, kind, autoClose: kind === 'discuss' || kind === 'exec', root, session: meta.host_session, ready: path.join(ctx.dir, 'viewer-ready.json') });
     return { status: 'requested', lease };
   } catch (error) {
     try { if (JSON.parse(fs.readFileSync(lease)).token === token) fs.rmSync(lease); } catch { /* best effort */ }
