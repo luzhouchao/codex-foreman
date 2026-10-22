@@ -37,7 +37,7 @@ node "<cli>" cancel --run <run_id> --workspace "<主对话工作区绝对路径>
 
 ## 结果与验收
 
-保存 run_id，通过 status 查看状态。`dispatch.watch: "auto"` 时，Windows 执行器会在任务登记后自动打开实时终端；同一 Codex 会话的同组任务共用窗口，主控无需另外开窗。将参与同一场讨论的调用传入相同的 `--group`。窗口关闭或按 q 只结束查看，任务继续；自动讨论窗口（含讨论续接）在同会话同组已登记任务全部结束、经过 5 秒登记稳定期后自动关闭；执行和审查窗口保留结果。手动 watch 不关闭用户终端，已打开的旧版窗口不受更新影响。设为 `"off"` 可关闭自动展示。其他系统目前手动运行 watch。
+保存 run_id，通过 status 查看状态。`dispatch.watch: "auto"` 时，Windows 执行器会在任务登记后自动打开实时终端；同一 Codex 会话的同组任务共用窗口，主控无需另外开窗。将参与同一场讨论的调用传入相同的 `--group`。窗口关闭或按 q 只结束查看，任务继续；自动讨论窗口（含讨论续接）在同会话同组已登记任务全部正常完成、经过 5 秒登记稳定期后自动关闭；失败、超时、取消或需要输入时保留窗口显示原因。执行和审查窗口保留结果。手动 watch 不关闭用户终端，已打开的旧版窗口不受更新影响。设为 `"off"` 可关闭自动展示。其他系统目前手动运行 watch。
 
 此实现使用独立 Windows PowerShell 窗口，尚未连接 Codex 内置终端。`meta.json` 中的 viewer 记录启动请求或错误，`viewer-ready.json` 表示查看器已真正启动。开窗失败时继续任务，并提供手动 watch 命令。可重新运行 watch 查看记录。
 
@@ -76,3 +76,11 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 ```
 
 `<cli>` 为 `skills/codex-foreman/scripts/cli.mjs` 的绝对路径。记录写入主工作区 `.codex/foreman/native-tasks/<task_id>.json`，独立于外部 CLI 的 runs。更新时重新提交完整 JSON；完成后填写实际产物、测试结果、验收标准及状态依据。`status` 允许 assigned、running、completed、failed、cancelled、blocked；所有状态均由主控明确报告，时间戳只是记录时间。不会把本地记录当作实时状态，也不推算内置任务 token 或费用。输入校验、临时文件原子替换和目录链接检查用于防止损坏或路径穿越；不提供并发合并，同任务同时更新以最后一次成功替换为准。
+
+## 讨论预算与记录清理
+
+主控为 pi 讨论显式指定 `--scope <相关路径>` 或 `--file <文件>`，可重复使用；未指定范围只分析任务材料。主控每次用 `--max-files N` 指定文件数、`--max-tool-calls N` 指定工具预算；文件数默认不限，工具调用默认 24 次，讨论默认最多 2 轮。续接不传新值时沿用上次预算。预算超限或访问范围外路径时暂停交主控决定，不自动扩大范围或无限重试。pi 预载上下文和历史不在工具读取计数内，不能把该预算当作 token 上限。
+
+结果中的未知用量与费用应报告“暂无数据”，不能视为零；已经返回的部分用量在失败或取消后仍有意义，上游填充的零值无法与真实零值再区分。
+
+用户要求清理时先运行 `cleanup --workspace "<主工作区>" --group <组名>` 或 `--before YYYY-MM-DD` 查看候选，已获删除授权后再加 `--apply`。只清理工作区 `.codex/foreman/runs`；活跃任务、查看器或不明状态阻止清理，不绕过检查。此命令不删除内置对话、native-tasks、讨论汇总、更新材料或配置。

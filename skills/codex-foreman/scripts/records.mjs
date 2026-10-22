@@ -1,6 +1,7 @@
 // 记录目录、启动登记锁、准入、活动状态和 watch 启动器。
 import fs from 'node:fs';
 import path from 'node:path';
+import { recoverUsage } from './usage.mjs';
 import { ENTRY, defaultRunsRoot, resolveAgentAlias, DEFAULT_AGENT_PARALLEL } from './config.mjs';
 import { M, die, pidAlive, sleep, pathKey, clip, oneLine, plainCommand } from './util.mjs';
 
@@ -211,7 +212,7 @@ function runOutcome(run) {
   const running = isRunning(m);
   let status = m.status === 'running' && !running ? 'interrupted' : m.status;
   const file = path.join(run.dir, 'result.json');
-  const result = !running && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  const result = !running ? (fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { ...recoverUsage(run.dir, m.agent_type), status }) : null;
   // result 先原子写入，是终态权威；进程退出后可恢复尚未来得及发布的 meta 终态。
   if (!running && result?.status) status = result.status;
   // 交回问题的任务已经正常结束，只是有事要 Codex 决定，不算失败

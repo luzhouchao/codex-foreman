@@ -42,15 +42,19 @@ const inside = (root, target) => {
 
 export default function foremanGuard(pi) {
   let policy = null;
+  let calls = 0;
+  const files = new Set();
   try { policy = JSON.parse(process.env.CODEX_FOREMAN_PI_GUARD || ''); } catch { /* 没有策略时全部拒绝 */ }
   pi.on('tool_call', async (event) => {
     if (!policy?.root) return { block: true, reason: 'foreman guard: no policy for this run, so every tool is blocked' };
+    if (policy.discussion && ++calls > policy.discussion.max_tool_calls) return { block: true, reason: 'foreman guard: discussion tool-call budget exhausted; dispatcher decision required' };
     if (!(ALLOWED[policy.access] || []).includes(event.toolName)) {
       return { block: true, reason: `foreman guard: ${event.toolName} is not allowed in this run` };
     }
     // shell 档的命令没有系统沙箱，只靠任务说明约束；守卫只管文件工具的路径。
     if (event.toolName === 'bash') return undefined;
     const root = realPath(path.resolve(policy.root));
+    const targets = [];
     for (const key of PATH_KEYS) {
       const value = event.input?.[key];
       if (value == null || value === '') continue;
@@ -58,6 +62,23 @@ export default function foremanGuard(pi) {
       let target;
       try { target = realPath(piPath(value, root)); } catch { return { block: true, reason: `foreman guard: can't resolve ${value}` }; }
       if (!inside(root, target)) return { block: true, reason: `foreman guard: ${value} is outside the project directory` };
+      targets.push(target);
+    }
+    if (policy.discussion) {
+      // Missing paths default to cwd in pi. Check the effective path rather than
+      // letting omitted arguments bypass a restricted subtree.
+      if (!targets.length) targets.push(root);
+      const scopes = (policy.discussion.paths || []).map((p) => realPath(path.resolve(root, p)));
+      for (const target of targets) {
+        if (!scopes.some((scope) => inside(scope, target))) return { block: true, reason: 'foreman guard: path is outside the discussion scope; dispatcher decision required' };
+        if (event.toolName === 'read' || event.toolName === 'grep') {
+          let stat;
+          try { stat = fs.statSync(target); } catch { /* Invalid file still consumes a tool call. */ }
+          if (event.toolName === 'grep' && !stat?.isFile()) return { block: true, reason: 'foreman guard: discussion grep requires one explicit file; directory content searches exceed the file budget' };
+          if (policy.discussion.max_files != null && !files.has(target) && files.size >= policy.discussion.max_files) return { block: true, reason: 'foreman guard: discussion file budget exhausted; dispatcher decision required' };
+          files.add(target);
+        }
+      }
     }
     return undefined;
   });

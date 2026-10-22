@@ -51,14 +51,15 @@ test('配置：pi cli 的模型写法、run_access、推理强度和执行授权
 test('讨论：只读工具和守卫、隔离参数、事件翻译、用量和费用', async (t) => {
   const h = sandbox(t);
   configure(h, {}, (c) => { c.levels.discuss.complex = [{ agent: 'pi', effort: 'high' }]; });
+  h.write('src/file.mjs', '// synthetic\n');
   const guardFile = path.join(h.home, 'guard.log');
   const s = h.scenario({ guard_file: guardFile, steps: [...tool('read', { path: path.join(h.cwd, 'src/file.mjs') }), ...tool('grep', { pattern: 'todo', path: 'src' })] });
-  const r = output(await h.bridge(taskArgs(h, 'discuss', ['--agent', 'pi', '--title', '合成讨论']), { env: s.env, input: '合成议题' }));
+  const r = output(await h.bridge(taskArgs(h, 'discuss', ['--agent', 'pi', '--title', '合成讨论', '--scope', 'src']), { env: s.env, input: '合成议题' }));
   assert.deepEqual(r.report, discussion);
   assert.equal(r.agent_type, 'pi cli');
   const call = runs(s)[0];
   assert.deepEqual(call.args, ['--mode', 'json', '--model', 'fake/model', ...ISOLATE, '-e', GUARD, '--thinking', 'high', '--tools', 'read,grep,find,ls', '--session-dir', path.join(r.run_dir, 'pi-sessions'), '--name', '合成讨论']);
-  assert.deepEqual(policies(guardFile), [{ root: h.cwd, access: 'read' }]);
+  assert.deepEqual(policies(guardFile), [{ root: h.cwd, access: 'read', discussion: { paths: [path.join(h.cwd, 'src')], max_files: null, max_tool_calls: 24, max_rounds: 2 } }]);
   assert.ok(call.stdin.startsWith('合成议题'));
   assert.ok(call.stdin.includes('不能运行命令'));
   assert.deepEqual(r.usage, { input_tokens: 17, cached_input_tokens: 3, output_tokens: 5, reasoning_output_tokens: 2 });

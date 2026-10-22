@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { amount, emptyUsage, addUsage } from '../usage.mjs';
 import { ENTRY, DISCUSS_SCHEMA } from '../config.mjs';
 import { newRunDir } from '../records.mjs';
 import { startRun, finishDiscussion, eventWriter, runLimits, watchCancellation, reportWithRepair, validateSchema } from '../runner.mjs';
@@ -12,10 +13,10 @@ const redactKey = (s, key) => (key && key.length >= 8 ? s.replaceAll(key, '[REDA
 
 // 兼容 OpenAI 的接口各家缓存字段名不同：DeepSeek 是 prompt_cache_hit_tokens，OpenAI 是 prompt_tokens_details.cached_tokens。
 const apiUsage = (u) => ({
-  input_tokens: u?.prompt_tokens || 0,
-  cached_input_tokens: u?.prompt_cache_hit_tokens ?? u?.prompt_tokens_details?.cached_tokens ?? 0,
-  output_tokens: u?.completion_tokens || 0,
-  reasoning_output_tokens: u?.completion_tokens_details?.reasoning_tokens ?? 0,
+  input_tokens: amount(u?.prompt_tokens),
+  cached_input_tokens: amount(u?.prompt_cache_hit_tokens ?? u?.prompt_tokens_details?.cached_tokens),
+  output_tokens: amount(u?.completion_tokens),
+  reasoning_output_tokens: amount(u?.completion_tokens_details?.reasoning_tokens),
 });
 
 // 配置里直接写的 api_key 优先（看得见，也不会被忘了删的旧环境变量顶替），没有再读 api_key_env 指向的环境变量。
@@ -59,7 +60,7 @@ async function executeApi(ctx) {
     const target = meta.group != null ? `--group ${meta.group}` : `--run ${id}`;
     process.stderr.write(`foreman: ${M.busyHint(`node "${ENTRY}" await-busy ${target}`, cfg.dispatch.busy_ask_min)}\n`);
   }
-  const usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 };
+  const usage = emptyUsage();
   const notes = [];
   const warnings = [];
   const errors = [];
@@ -88,7 +89,7 @@ async function executeApi(ctx) {
           onEvent: (ev) => {
             if (ev.type === 'api.usage') {
               ev.usage = apiUsage(ev.usage);
-              for (const key of Object.keys(usage)) usage[key] += ev.usage[key];
+              addUsage(usage, ev.usage);
             }
             if (ev.text) ev.text = redact(ev.text);
             event(ev);

@@ -65,7 +65,7 @@ npm test
 
 将用户配置的 `dispatch.watch` 设为 `"auto"`，Windows 上每次执行、讨论、审查或续接会自动打开独立终端窗口（优先 PowerShell 7，未安装时回退 Windows PowerShell），显示模型、进度、工具活动和结果。同一 Codex 会话、同一个 `--group` 的并发参与方合用一个窗口。默认关闭，按需在用户配置中开启。
 
-按 q 或关闭查看窗口不会取消任务，需停止任务时使用 `cancel --run <id> --workspace "<主对话工作区绝对路径>"`。自动打开的讨论窗口（含讨论续接）会等待同会话同组已登记任务全部结束，并经过现有的 5 秒登记稳定期后自动关闭；执行和审查窗口仍保留结果。手动 watch 不会关闭用户终端。已打开的旧版窗口不受更新影响。恢复手动展示只需设为 `"off"`。窗口启动失败不影响任务；错误写入日志，可用 watch 手动查看。
+按 q 或关闭查看窗口不会取消任务，需停止任务时使用 `cancel --run <id> --workspace "<主对话工作区绝对路径>"`。自动打开的讨论窗口（含讨论续接）会等待同会话同组已登记任务全部正常完成，并经过 5 秒登记稳定期后自动关闭；任一参与方失败、超时、取消或需要输入时保留窗口显示原因，由用户关闭。执行和审查窗口仍保留结果。手动 watch 不会关闭用户终端。已打开的旧版窗口不受更新影响。恢复手动展示只需设为 `"off"`。窗口启动失败不影响任务；错误写入日志，可用 watch 手动查看。
 
 此功能由执行器直接触发，不依赖钩子是否已信任。目前自动窗口支持 Windows；Codex 内置终端的自动执行入口尚未接入，其他系统使用手动 watch。
 
@@ -97,7 +97,7 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 
 ## 记录保留范围
 
-新建 pi 原生会话随对应 run 保存到主工作区；旧全局 pi 会话保留，续接兼容旧记录，不自动搬迁或删除认证配置。删除主工作区 `.codex/foreman` 只清理该目录中的 Foreman 日志和任务记录，不包含 Codex 原生主会话、子会话，也不代表卸载技能或钩子。当前没有自动清理流程。
+新建 pi 原生会话随对应 run 保存到主工作区；旧全局 pi 会话保留，续接兼容旧记录，不自动搬迁或删除认证配置。删除主工作区 `.codex/foreman` 只清理该目录中的 Foreman 日志和任务记录，不包含 Codex 原生主会话、子会话，也不代表卸载技能或钩子。清理命令只按用户明确选择操作，不会自动定期删除。
 
 讨论可采用主控独立意见加外部中立评议；材料集中给出、按任务选择参与人数、有实质分歧才开第二轮。例如可配置 DeepSeek max、GLM max、MiMo high 参与讨论，并由主控调用内置 gpt-6.1-sol 执行；发行默认仍由主控处理，安装不代表后续外部调用授权。
 
@@ -115,3 +115,21 @@ node .\skills\codex-foreman\scripts\cli.mjs version --workspace "E:\your-workspa
 ```
 
 更新先暂存并备份技能，保留用户配置及日志；失败尝试自动恢复，恢复失败会报告备份位置。返回的 backup 是显式回退所需 ID。无版本标记的既有安装显示 legacy；CLI version 从安装版本标记读取版本，源码调用回退到 package.json。更新自身钩子时保留其他钩子；安装器不写信任记录，仍需用户在 /hooks 审阅。回退时若 hooks.json 在更新后又有改动，会拒绝覆盖，需手动合并。技能目录中的托管程序文件会被替换，修改前应保存自己的程序补丁。
+
+## 讨论范围与用量
+
+讨论默认最多 2 轮。pi 的文件数量由主控每次根据任务指定，默认不设数量上限；工具调用默认最多 24 次，可按本次任务调整。主控使用 `--max-files N` 指定文件数、`--max-tool-calls N` 指定工具预算，使用 `--scope <路径>` 或 `--file <文件>` 指定与议题有关的范围，可以重复传入。未指定范围时只分析提供的任务材料；越界或超限暂停为 `needs_input`，由主控决定调整范围或预算后是否继续，不自动放宽。pi 自行预载的上下文及历史会话不属于文件工具计数范围，这些限制不等于完整 token 上限。
+
+用量由实际返回值统计：未返回的 token、缓存和费用显示“暂无数据”，明确返回的 0 显示为 0。上游自身把缺失数据补成 0 时，Foreman 无法进一步区分。失败或取消不会清零已经收到的用量。
+
+## 安全清理运行记录
+
+清理仅操作主工作区 `.codex/foreman/runs` 内的运行记录，默认预览。按讨论组或 UTC 日期选择（严格早于该日零点），追加 `--apply` 才删除：
+
+```powershell
+node .\skills\codex-foreman\scripts\cli.mjs cleanup --workspace "E:\your-workspace" --group "discussion-name"
+node .\skills\codex-foreman\scripts\cli.mjs cleanup --workspace "E:\your-workspace" --before 2026-10-01
+node .\skills\codex-foreman\scripts\cli.mjs cleanup --workspace "E:\your-workspace" --group "discussion-name" --apply
+```
+
+存在活跃任务、查看器或无法确认安全的记录时拒绝清理。删除后相应日志和 pi 会话不可再查询或续接；命令不清理 `native-tasks`、讨论汇总、更新验收材料、用户配置或 Codex 原生对话。

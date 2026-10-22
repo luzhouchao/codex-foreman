@@ -11,18 +11,19 @@ import { computeReviewScope } from './review-scope.mjs';
 import { cmdWatch } from './watch.mjs';
 import { cmdStatus, cmdCancel, cmdAwaitBusy } from './status.mjs';
 import { cmdNativeRecord } from './native-records.mjs';
+import { cmdCleanup } from './cleanup.mjs';
 import { M, die, need, resolveDir, readBrief, isGitRepo, isAscii, agentTypeOf, closestMatches } from './util.mjs';
 
 // 先加载配置，再迁移记录和重写启动器；这些步骤仍在解析参数之前完成。
 const load = (cwd) => loadConfig(cwd, adapters);
 const { cmd, opts } = parseArgs(process.argv.slice(2));
 const CONFIG = load(null);
-initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
+if (cmd !== 'cleanup') initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
   const opts = { 'add-dir': [], track: [], scope: [], file: [] };
-  const flags = new Set(['uncommitted', 'no-snapshot', 'verbose', 'no-intro']);
+  const flags = new Set(['uncommitted', 'no-snapshot', 'verbose', 'no-intro', 'apply', 'help']);
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (!a.startsWith('--')) die(M.badArg(a));
@@ -58,33 +59,33 @@ async function cmdResume(o) {
   const parent = findRun(need(o, 'run'));
   o.track = [...(parent.meta.track || []), ...o.track];
   o.group ??= parent.meta.group ?? null;
-  if (!o.scope.length) o.scope = parent.meta.scope || [];
+  if (!o.scope.length) o.scope = parent.meta.scope?.length ? parent.meta.scope : parent.meta.discussion_limits?.paths || [];
   const kind = parent.meta.kind || (parent.meta.mode === 'review' ? 'review' : 'exec');
   if (kind === 'review') die(M.reviewNoResume);
   adapters[agentTypeOf(parent.meta)].validateResume?.(parent);
   const discuss = kind === 'discuss';
   if (o.group != null && !discuss && !o.scope.length) die(M.groupNeedsScope);
+  const cfg = load(parent.meta.cwd);
   let round = null;
   if (discuss) {
-    const max = CONFIG.dispatch.discuss_max_rounds;
+    const max = cfg.dispatch.discuss_max_rounds;
     if (!Number.isInteger(max) || max < 1) die(M.badDiscussMaxRounds);
-    // 沿续接链往回数已经完成的轮次；卡死或失败后的续接仍算同一轮。
+    // 每次启动都占一轮，避免失败或超限后的续接无限绕过讨论预算。
     let done = 0;
     let rootId = parent.id;
     for (let rid = parent.id, m = parent.meta; m; rid = m.parent, m = m.parent ? readMeta(path.join(RUNS_ROOT, m.parent)) : null) {
-      if (m.status === 'done') done++;
+      done++;
       rootId = rid;
     }
     round = done + 1;
     if (round > max) die(M.discussRoundsExceeded(rootId, done, max));
   }
-  const cfg = load(parent.meta.cwd);
   const brief = readBrief(o);
   // 什么模型都没配置时沿用上一轮记录的模型，同一会话不中途换模型。
   const profile = pickProfile(cfg, o, discuss ? 'discuss' : 'run', adapters, parent.meta.model, parent.meta.agent || 'codex');
   return adapters[profile.agent.type].execute({ cfg, ...profile, mode: 'resume', kind, cwd: parent.meta.cwd, brief,
     title: o.title || parent.meta.title, parent: parent.id, parentDir: parent.dir, sessionId: parent.meta.session_id,
-    previousRunAccess: parent.meta.run_access, round, opts: o });
+    previousRunAccess: parent.meta.run_access, previousDiscussionLimits: parent.meta.discussion_limits, round, opts: o });
 }
 
 async function cmdReview(o) {
@@ -227,5 +228,6 @@ async function cmdModels() {
 // 新建任务组时组名只用 ASCII：实时查看要把它写进终端命令，桌面版的终端面板只接受 ASCII 命令。
 if (['run', 'discuss', 'resume'].includes(cmd) && opts.group != null && !/^[A-Za-z0-9._-]{1,64}$/.test(opts.group)) die(M.badGroupName(opts.group));
 const commands = { run: cmdRun, discuss: cmdDiscuss, resume: cmdResume, review: cmdReview, status: (o) => cmdStatus(o, (meta) => adapters[agentTypeOf(meta)]?.stats?.(meta.session_id, meta.started_at)), watch: (o) => cmdWatch(o, load), config: cmdConfig, check: cmdCheck, models: cmdModels, cancel: cmdCancel, 'await-busy': (o) => cmdAwaitBusy(o, CONFIG), 'native-record': (o) => process.stdout.write(JSON.stringify(cmdNativeRecord(o), null, 2) + '\n'), version: () => process.stdout.write(JSON.stringify(versionInfo(), null, 2) + '\n') };
+commands.cleanup = (o) => cmdCleanup(o, CONFIG.dispatch.runs_dir ? path.resolve(o.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd(), CONFIG.dispatch.runs_dir) : null);
 if (!commands[cmd]) die(M.usage);
 await commands[cmd](opts);

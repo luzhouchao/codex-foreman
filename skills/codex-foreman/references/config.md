@@ -20,7 +20,7 @@ run、review、discuss 各有 simple、normal、complex。值为 "codex host" �
 ## dispatch
 
 - auto 默认 false，不主动派活；用户点名的调用按请求执行。不能覆盖会话权限。
-- watch 默认 off；设 auto 时 Windows 任务登记后自动打开实时终端（优先 PowerShell 7），同组共用窗口。关闭查看不取消任务。自动讨论窗口（含讨论续接）等待同会话同组已登记任务全部结束及 5 秒登记稳定期后关闭；执行和审查窗口保留结果，手动 watch 不关闭用户终端。已打开的旧版窗口不受更新影响。其他系统手动 watch。intro 默认 false，不播放动画。
+- watch 默认 off；设 auto 时 Windows 任务登记后自动打开实时终端（优先 PowerShell 7），同组共用窗口。关闭查看不取消任务。自动讨论窗口（含讨论续接）等待同会话同组已登记任务全部正常完成及 5 秒登记稳定期后关闭；失败、超时、取消或需要输入时保留窗口显示原因，执行和审查窗口保留结果，手动 watch 不关闭用户终端。已打开的旧版窗口不受更新影响。其他系统手动 watch。intro 默认 false，不播放动画。
 - discuss_max_rounds 默认 2，限制讨论轮数。
 - timeout_min 默认 480，stall_min 默认 40，busy_ask_min 默认 2，单位为分钟。
 - runs_dir 默认 CODEX_HOME/foreman/runs；CODEX_FOREMAN_RUNS_DIR 可覆盖。
@@ -34,3 +34,12 @@ run、review、discuss 各有 simple、normal、complex。值为 "codex host" �
 `codex host` 表示交回主控，不代表 CLI 调度内置 agent；用户选择内置 Sol 时由主控直接调用宿主工具，使用 native-record 保存明确报告的状态。该命令记录固定在主工作区 `.codex/foreman/native-tasks`，不跟随 dispatch.runs_dir 的绝对路径覆盖。
 
 主控遵循用户的讨论与执行偏好。例如可配置 DeepSeek max、GLM max、MiMo high 参与讨论，并选择内置 gpt-6.1-sol 执行；不将示例硬编码为通用发行默认。旧全局运行目录和 pi 原生会话不会自动迁移或删除；认证仍由原 CLI 管理。Windows 自动查看器是独立窗口，优先 PowerShell 7、回退 Windows PowerShell，不是 Codex 内置终端，也不监测内置子智能体。
+
+## pi 讨论读取预算
+
+- `dispatch.discuss_max_files` 默认 null，不设置固定文件数上限；主控每次根据任务用 `--max-files N` 指定。
+- `dispatch.discuss_max_tool_calls` 默认 24，可用 `--max-tool-calls N` 临场指定。
+- `dispatch.discuss_max_rounds` 默认 2，失败或中止的启动也计入轮数。
+- 项目配置只能收紧这些上限，命令参数不得突破项目上限。
+
+用 `--scope` / `--file` 限定相关路径；未指定时仅讨论已有材料。pi 的文件工具守卫执行限制，超限停止为 needs_input，由主控决定是否继续。grep 需明确到文件，避免一次目录全文搜索绕过文件计数。pi 预载说明、历史上下文不在工具预算内；这些参数不提供 token 或费用总量封顶。

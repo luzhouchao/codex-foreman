@@ -19,6 +19,25 @@ test('优先 PowerShell 7，没有安装时回退 Windows PowerShell', () => {
   assert.equal(powerShellExecutable(env, () => false), 'powershell.exe');
   assert.ok(windowsLaunchScript({}, expected).includes(expected));
 });
+
+test('失败、超时和需要输入的讨论保留窗口并展示原因', async (t) => {
+  await Promise.all(['failed', 'timeout', 'needs_input', 'cancelled'].map(async (status) => {
+    const h = sandbox(t);
+    const dir = path.join(h.runs, 'issue');
+    write(path.join(dir, 'meta.json'), { id: 'issue', mode: 'discuss', kind: 'discuss', status, cwd: h.cwd, started_at: new Date().toISOString(), host_session: 'test-session' });
+    write(path.join(dir, 'result.json'), { status, errors: ['synthetic reason'] });
+    const lease = path.join(h.runs, 'lease.json');
+    write(lease, { token: status });
+    const payload = { lease, token: status, ready: path.join(dir, 'ready.json'), root: h.runs, run: 'issue', session: 'test-session', autoClose: true };
+    const viewer = h.start(path.join(ROOT, 'skills/codex-foreman/scripts/watch-window.mjs'), [Buffer.from(JSON.stringify(payload)).toString('base64')]);
+    await poll(() => viewer.stdout.includes('窗口已保留'), status);
+    assert.equal(viewer.child.exitCode, null);
+    assert.match(viewer.stdout, /synthetic reason/);
+    assert.equal(fs.existsSync(path.join(dir, 'cancel')), false);
+    viewer.stop();
+    await viewer.done;
+  }));
+});
 test('watch off 与非 Windows 不启动外部窗口', (t) => {
   const { ctx, meta } = fixture(t);
   const launch = () => assert.fail('不应启动');
@@ -91,7 +110,7 @@ test('自动讨论查看器等待同会话整组结束，自然退出且不取�
   task('first', 'done');
   await pause(6100); // 超过已有的 5 秒组登记稳定期，第二个任务仍在运行。
   assert.equal(viewer.child.exitCode, null);
-  task('second', 'cancelled');
+  task('second', 'done');
   const result = await viewer.done;
   assert.equal(result.code, 0, result.stderr);
   assert.equal(fs.existsSync(lease), false);

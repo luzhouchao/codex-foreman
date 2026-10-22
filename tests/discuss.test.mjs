@@ -213,7 +213,7 @@ test('opencode 会话导出失败时保留报告并提示缺少用量', async (t
   assert.equal(r.usage, null);
   assert.equal(r.cost_usd, null);
   assert.ok(r.notes[0].includes('synthetic export failed'));
-  assert.ok(r.notes[0].includes('没有 token 统计'));
+  assert.ok(r.notes[0].includes('仅使用已收到的完整事件统计'));
 });
 
 test('同组多方并发，await-busy 列出超过阈值的 API 参与方', async (t) => {

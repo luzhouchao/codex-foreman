@@ -105,7 +105,7 @@ function verboseRenderer(meta, rel) {
       out(blocked ? C.yellow('?') : '■', blocked ? C.yellow(text) : text, m?.ended_at);
     }
     else out('■', m?.status === 'running' ? M.watchInterrupted : M.watchEnded(m?.status), m?.ended_at);
-    if (r?.usage) out('Σ', M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (m?.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total'), m?.ended_at);
+    if (r) out('Σ', M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (m?.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total', r.cost_usd), m?.ended_at);
   };
   return { header, show, finish, goLive: () => { live = true; } };
 }
@@ -448,7 +448,7 @@ function timelineRenderer(meta, rel, { screen: useScreen = false, dir = null } =
     const ok = !blocked && r.status === 'done' && (!r.report?.status || r.report.status === 'completed');
     const color = ok ? C.green : blocked ? C.yellow : C.red;
     write(node(m?.ended_at, color('└')) + color(C.bold(`${ok ? '✔' : blocked ? '?' : '✗'} ${M.watchFinished(M.statusName(shownStatus(r.status, r)), M.duration(r.duration_s), changedFor(r, m))}`)));
-    if (r.usage) write(' '.repeat(TIME_W + 2) + C.dim(M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (m?.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total')));
+    if (r) write(' '.repeat(TIME_W + 2) + C.dim(M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (m?.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total', r.cost_usd)));
     const summary = r.report?.summary || r.report?.position;
     if (summary) { write(); paragraph(summary, '  ', 12); }
     const issues = r.report?.open_issues || r.report?.open_questions || [];
@@ -783,7 +783,7 @@ async function watchGroup(group, o, loadCfg) {
   for (const run of all) {
     const { result: r, ok } = runOutcome(run);
     out.push(C.dim('─'.repeat(width)), ...panelHead(run, feeds.get(run.id).stats, width, !title));
-    if (r?.usage) out.push(`  ${C.dim(fitWidth(M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (run.meta.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total'), inner))}`);
+    if (r) out.push(`  ${C.dim(fitWidth(M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (run.meta.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total', r.cost_usd), inner))}`);
     const final = r?.report?.position || r?.report?.summary;
     if (final) for (const l of wrapWidth(M.watchOpinion(final.trim()), inner)) out.push(`  ${l}`);
     for (const e of realErrors(r, ok)) for (const l of wrapWidth(`${r.status === 'needs_input' ? '?' : '✗'} ${oneLine(e)}`, inner)) {

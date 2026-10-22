@@ -39,7 +39,7 @@ const MODES = ['run', 'review', 'discuss'];
 const HOST_CODEX = 'codex host';
 const CODEX_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const DEFAULT_CONFIG = {
-  dispatch: { auto: false, watch: 'off', intro: false, discuss_max_rounds: 2, timeout_min: 480, stall_min: 40, busy_ask_min: 2, runs_dir: null },
+  dispatch: { auto: false, watch: 'off', intro: false, discuss_max_rounds: 2, discuss_max_files: null, discuss_max_tool_calls: 24, timeout_min: 480, stall_min: 40, busy_ask_min: 2, runs_dir: null },
   agents: {},
   levels: Object.fromEntries(MODES.map((mode) => [mode, Object.fromEntries(LEVELS.map((lv) => [lv, HOST_CODEX]))])),
 };
@@ -257,6 +257,8 @@ function validateConfig(cfg, adapters, fail = die) {
   check(typeof cfg.dispatch.auto === 'boolean', 'dispatch.auto', why.boolean);
   check(['auto', 'off'].includes(cfg.dispatch.watch), 'dispatch.watch', why.watch);
   check(typeof cfg.dispatch.intro === 'boolean', 'dispatch.intro', why.boolean);
+  check(cfg.dispatch.discuss_max_files === null || (Number.isInteger(cfg.dispatch.discuss_max_files) && cfg.dispatch.discuss_max_files >= 1), 'dispatch.discuss_max_files', why.positiveInt);
+  for (const field of ['discuss_max_tool_calls']) check(Number.isInteger(cfg.dispatch[field]) && cfg.dispatch[field] >= 1, `dispatch.${field}`, why.positiveInt);
   check(Number.isInteger(cfg.dispatch.discuss_max_rounds) && cfg.dispatch.discuss_max_rounds >= 1, 'dispatch.discuss_max_rounds', why.positiveInt);
   for (const key of ['timeout_min', 'stall_min', 'busy_ask_min']) check(Number.isFinite(cfg.dispatch[key]) && (key === 'timeout_min' ? cfg.dispatch[key] > 0 : cfg.dispatch[key] >= 0), `dispatch.${key}`, why.minutes);
   check(cfg.dispatch.runs_dir === null || text(cfg.dispatch.runs_dir), 'dispatch.runs_dir', why.pathOrNull);
@@ -302,6 +304,7 @@ function projectConfig(cfg, project) {
       allowed.dispatch = {};
       for (const [field, val] of Object.entries(value)) {
         if (['timeout_min', 'stall_min', 'busy_ask_min'].includes(field)) allowed.dispatch[field] = val;
+        else if (['discuss_max_rounds', 'discuss_max_files', 'discuss_max_tool_calls'].includes(field) && Number.isInteger(val) && val >= 1 && (cfg.dispatch[field] == null || val <= cfg.dispatch[field])) allowed.dispatch[field] = val;
         else ignored.push(`dispatch.${field}`);
       }
     } else if (key === 'levels' && isObject(value)) {
@@ -361,6 +364,7 @@ function buildStarterConfig(environment) {
 
 function loadConfig(cwd, adapters) {
   const sources = [];
+  let discussionProjectLimits = {};
   let cfg = DEFAULT_CONFIG;
   if (!fs.existsSync(USER_CONFIG)) {
     try {
@@ -377,12 +381,16 @@ function loadConfig(cwd, adapters) {
   if (user) { cfg = mergeConfig(cfg, migrateStructure(user, USER_CONFIG, LEGACY_DEFAULT_CONFIG, false, adapters)); sources.push(USER_CONFIG); }
   if (cwd) {
     const file = projectFile(cwd, PROJECT_CONFIG, LEGACY_PROJECT_CONFIG), project = readJson(file);
-    if (project) { cfg = mergeConfig(cfg, projectConfig(cfg, migrateStructure(project, file, cfg, true, adapters))); sources.push(file); }
+    if (project) {
+      const allowed = projectConfig(cfg, migrateStructure(project, file, cfg, true, adapters));
+      discussionProjectLimits = Object.fromEntries(Object.entries(allowed.dispatch || {}).filter(([k]) => k.startsWith('discuss_')));
+      cfg = mergeConfig(cfg, allowed); sources.push(file);
+    }
   }
   const runsDir = envOf('CODEX_FOREMAN_RUNS_DIR', 'CODEX_FOREMAN_LEGACY_RUNS_DIR');
   if (runsDir) cfg = mergeConfig(cfg, { dispatch: { runs_dir: runsDir } });
   validateConfig(cfg, adapters);
-  return { ...cfg, sources };
+  return Object.defineProperty({ ...cfg, sources }, 'discussionProjectLimits', { value: discussionProjectLimits });
 }
 
 

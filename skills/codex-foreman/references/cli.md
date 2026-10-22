@@ -60,3 +60,24 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 ## version
 
 `node "<cli>" version --workspace "<主工作区>"` 输出版本与来源 JSON。安装副本读取 `.foreman-install.json`，源码调用读取 package.json；config 输出也包含 version。它不联网检查更新。
+
+## discuss / resume 读取预算（pi）
+
+- `--scope <路径>`、`--file <文件>`：可重复，指定项目内相关范围。未指定时仅使用任务材料，不开放文件工具。
+- `--max-files N`：主控临场指定本次可读取的不同文件数量，未指定时沿用配置；发行默认不设固定文件数上限。
+- `--max-tool-calls N`：本次工具调用上限，默认 24；两种预算均为正整数，项目显式上限不能被参数扩大。
+- resume 不传新预算时继承父记录，并按当前项目上限收紧。
+- 默认最多 2 轮，每次启动（包括失败、中止）占一轮；超限需主控调整后再发起，不自动重试。
+- 文件/工具预算只由 pi 守卫执行；不约束 pi 自动预载的上下文和已有会话，不是 token 总量限制。
+
+## cleanup
+
+`cleanup --workspace <主工作区> (--group <组名> | --before YYYY-MM-DD) [--apply]`，使用 `--help` 查看说明。
+
+默认返回 JSON 预览，只有 `--apply` 执行删除；日期按 `started_at` 严格早于所给日期 UTC 零点筛选，两个条件同时给出时取交集。组名跨 Codex 会话匹配，预览中核对 `host_session`。删除父记录可能使保留的续接记录失去父链，不自动级联删除。
+
+只允许工作区 `.codex/foreman/runs`，配置指向其他目录时拒绝。存在活跃任务、查看器、登记锁、目录链接或无法确认结束的记录则整批阻止。为保守起见，运行根目录内任何活跃查看器或损坏元数据都可能阻止本次清理。不会清理 native-tasks、讨论汇总、更新材料或 Codex 原生会话。
+
+## 缺失用量
+
+`usage` 可以为 null，其中字段也可为 null；`cost_usd: null` 或缺少该字段表示费用未知。明确返回的 0 与未知不同。强制取消时从落盘完整事件恢复的用量带 `usage_partial: true`，不含未返回或未完整写入的数据。界面显示“暂无数据”，费用不按缺失值补零。上游自行生成的零值无法进一步判定是否真实未命中缓存。

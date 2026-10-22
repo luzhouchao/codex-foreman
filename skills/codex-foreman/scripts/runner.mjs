@@ -145,7 +145,7 @@ function finishDiscussion(run, { usage, cost, commands = 0, errors, notes, warni
     run_id: id, mode, kind: ctx.kind, status: meta.status, title: meta.title, cwd, track: [], group: meta.group, round: meta.round, scope: meta.scope,
     agent: agentName, agent_type: agent.type, model, model_shown: meta.model_shown, level, effort, sandbox: null, parent: meta.parent, session_id: meta.session_id,
     exit_code: meta.status === 'done' ? 0 : 1, duration_s: Math.round((Date.now() - started) / 1000), usage, usage_scope: 'this_run',
-    ...(cost !== undefined ? { cost_usd: cost } : {}),
+    cost_usd: cost ?? null,
     last_request: null, rate_limit: null, quota_resets_at: null, commands_executed: commands, errors, notes, warnings, report,
     last_message: report ? undefined : last, changes: { available: false, note: changesNote },
     files: files.map(({ path, range, chars }) => ({ path, range, chars })), run_dir: dir,
@@ -303,7 +303,7 @@ async function execute(ctx, { run: runAgent, stats: sessionStats = () => null, d
   const result = {
     agent: agentName, agent_type: agent.type,
     ...(snapshotRequired ? { isolation, run_access: agent.run_access } : {}),
-    ...(r.cost !== undefined ? { cost_usd: r.cost } : {}),
+    cost_usd: r.cost ?? null,
     run_id: id,
     mode,
     kind,

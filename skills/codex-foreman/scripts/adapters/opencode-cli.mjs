@@ -1,3 +1,4 @@
+import { emptyUsage, addUsage, piUsage, hasUsage, amount, addAmount, recoverUsage } from '../usage.mjs';
 // opencode CLI：代理权限与环境、事件翻译、会话导出和检查项。
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -254,17 +255,19 @@ async function opencodeSession(run, schema, agentId) {
     try {
       if (exported.status !== 'done') throw new Error(exported.errors.join('; ') || exported.stderrTail || exported.status);
       const messages = JSON.parse(exported.stdout).messages.filter((m) => m.type === 'assistant' && m.time.created >= started);
-      usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 };
-      cost = 0;
+      usage = emptyUsage();
       for (const m of messages) {
-        const t = m.tokens || {}; // 出错的那条回复没有 tokens
-        usage.input_tokens += (t.input || 0) + (t.cache?.read || 0) + (t.cache?.write || 0);
-        usage.cached_input_tokens += t.cache?.read || 0;
-        usage.output_tokens += t.output || 0;
-        usage.reasoning_output_tokens += t.reasoning || 0;
-        cost += m.cost || 0;
+        const t = m.tokens;
+        addUsage(usage, piUsage({ input: t?.input, cacheRead: t?.cache?.read, cacheWrite: t?.cache?.write, output: t?.output, reasoning: t?.reasoning }));
+        cost = addAmount(cost, amount(m.cost));
       }
-    } catch (e) { usage = null; cost = null; notes.push(M.opencodeExportFailed(e.message)); }
+      if (!hasUsage(usage)) usage = null;
+    } catch (e) {
+      const recovered = recoverUsage(dir, 'opencode cli');
+      usage = recovered.usage; cost = recovered.cost_usd;
+      notes.push(M.opencodeExportFailed(e.message));
+      if (usage) notes.push('已从完整 step_finish 事件恢复部分用量，未返回的字段仍为暂无数据。');
+    }
   }
   fs.writeFileSync(path.join(dir, 'last-message.txt'), last);
   return { usage, usage_scope: 'this_run', cost, commands, errors, notes, warnings, report, last, observed,

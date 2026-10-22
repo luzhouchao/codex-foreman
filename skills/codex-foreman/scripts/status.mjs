@@ -1,6 +1,7 @@
 // 状态列表、终止任务和排队检查；会话统计由入口提供只读函数。
 import fs from 'node:fs';
 import path from 'node:path';
+import { recoverUsage } from './usage.mjs';
 import { RUNS_ROOT, CANCEL_FILE, UNFINISHED_STATUSES, listRuns, findRun, readMeta, isRunning, runEnd, runOutcome, groupRuns, groupSummary, describeActivity } from './records.mjs';
 import { M, die, need, pidAlive, killTree, writeJsonAtomic, sleep, modelOf, whoOf, agentTypeOf } from './util.mjs';
 
@@ -11,7 +12,7 @@ function cmdStatus(o, sessionStats) {
     if (fs.existsSync(file)) process.stdout.write(fs.readFileSync(file, 'utf8') + '\n');
     else {
       if (run.meta.status === 'running' && !pidAlive(run.meta.pid)) run.meta.status = 'interrupted';
-      process.stdout.write(JSON.stringify({ ...run.meta, activity: describeActivity(run.dir) }, null, 2) + '\n');
+      process.stdout.write(JSON.stringify({ ...run.meta, ...recoverUsage(run.dir, run.meta.agent_type), activity: describeActivity(run.dir) }, null, 2) + '\n');
     }
     return;
   }
@@ -32,7 +33,7 @@ function cmdStatus(o, sessionStats) {
       const last = sessionStats(m)?.last_request;
       row += `\n    └ ${M.statusActivity(a.idle_min ?? '-', a.step)}${last ? M.lastRequestNow(last, M.tokenCount) : ''}`;
     } else {
-      if (r?.usage) row += `\n    └ ${M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (m?.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total')}`;
+      if (r) row += `\n    └ ${M.tokenSummary(r.usage, r.last_request ?? r.context, M.tokenCount, (r.usage_scope ?? (m?.mode === 'resume' ? 'session_total' : 'this_run')) === 'session_total', r.cost_usd)}`;
     }
     return row;
   });
@@ -77,6 +78,7 @@ async function cmdCancel(o) {
   const resultFile = path.join(run.dir, 'result.json');
   if (fs.existsSync(resultFile)) { const result = JSON.parse(fs.readFileSync(resultFile, 'utf8')); m.status = result.status; m.ended_at ||= new Date().toISOString(); writeJsonAtomic(path.join(run.dir, 'meta.json'), m); print({ ok: true, status: m.status }); return; }
   Object.assign(m, { status: 'cancelled', ended_at: new Date().toISOString() });
+  writeJsonAtomic(resultFile, { run_id: run.id, status: 'cancelled', ...recoverUsage(run.dir, m.agent_type), errors: ['任务已强制终止；用量仅包含终止前已收到的完整事件。'], run_dir: run.dir });
   writeJsonAtomic(path.join(run.dir, 'meta.json'), m);
   print({ ok: true, status: 'cancelled', forced: true });
 }

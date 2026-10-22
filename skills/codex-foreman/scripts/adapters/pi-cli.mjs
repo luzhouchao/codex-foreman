@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { emptyUsage, addUsage as mergeUsage, piUsage, hasUsage, addAmount, amount } from '../usage.mjs';
 import { SCHEMA, DISCUSS_SCHEMA } from '../config.mjs';
+import { discussionPolicy, discussionLimitsPrompt } from '../discuss-limits.mjs';
 import { MAX_REVIEW_CHARS } from '../review-scope.mjs';
 import { newRunDir, isCancelled, readMeta } from '../records.mjs';
 import { startRun, finishDiscussion, execute, eventWriter, runLimits, reportWithRepair, spawnCli, validateSchema } from '../runner.mjs';
@@ -64,21 +66,18 @@ function deniedQuestions(denied, cwd) {
   return [...new Map(questions.map((q) => [q.detail, q])).values()];
 }
 
-function runPi({ agent, args, cwd, prompt = '', timeoutMs, stallMin = 0, runDir, onEvent, access = 'none' }) {
+function runPi({ agent, args, cwd, prompt = '', timeoutMs, stallMin = 0, runDir, onEvent, access = 'none', discussion = null }) {
   return new Promise((resolve) => {
     const { file, pre } = piCommand(agent);
     const out = { code: null, status: null, stdout: '', stderrTail: '', text: '', errors: [], events: 0, messages: [], questions: [],
-      usage: { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 }, cost: 0, thinkingLevel: null };
+      usage: emptyUsage(), cost: null, thinkingLevel: null };
     const running = new Map(), denied = [];
     let finalStop = null, finalError = null;
-    const addUsage = (u = {}) => {
-      out.usage.input_tokens += (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
-      out.usage.cached_input_tokens += u.cacheRead || 0;
-      out.usage.output_tokens += u.output || 0;
-      out.usage.reasoning_output_tokens += u.reasoning || 0;
-      out.cost += u.cost?.total || 0;
+    const addUsage = (u) => {
+      mergeUsage(out.usage, piUsage(u));
+      out.cost = addAmount(out.cost, amount(u?.cost?.total));
     };
-    const child = spawnCli(file, [...pre, ...args], { cwd, env: { ...process.env, CODEX_FOREMAN_PI_GUARD: JSON.stringify({ root: cwd, access }) },
+    const child = spawnCli(file, [...pre, ...args], { cwd, env: { ...process.env, CODEX_FOREMAN_PI_GUARD: JSON.stringify({ root: cwd, access, ...(discussion ? { discussion } : {}) }) },
       windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' }, {
       busy: () => running.size > 0,
       onInput: (line, min) => {
@@ -107,7 +106,10 @@ function runPi({ agent, args, cwd, prompt = '', timeoutMs, stallMin = 0, runDir,
         const start = running.get(ev.toolCallId);
         running.delete(ev.toolCallId);
         const text = (ev.result?.content || []).map((c) => c.text || '').join('');
-        if (ev.isError && text.startsWith('foreman guard:')) denied.push({ tool: ev.toolName, args: start?.args });
+        if (ev.isError && text.startsWith('foreman guard:')) {
+          denied.push({ tool: ev.toolName, args: start?.args });
+          if (discussion) { out.questions.push({ source: 'discussion_limit', question: text }); stop('needs_input'); }
+        }
       }
       if (ev.type === 'message_end' && ev.message?.role === 'assistant') {
         const m = ev.message;
@@ -169,10 +171,15 @@ async function executePi(ctx) {
   const { model, agent, level, cwd, brief, mode, opts } = ctx;
   if (ctx.parent && !ctx.sessionId) die(M.noSession(ctx.parent));
   const review = ctx.kind === 'review', exec = ctx.kind === 'exec';
-  const access = exec ? agent.run_access : 'read';
+  let access = exec ? agent.run_access : 'read';
   const schemaText = review ? null : fs.readFileSync(exec ? SCHEMA : DISCUSS_SCHEMA, 'utf8');
   const schema = review ? null : JSON.parse(schemaText);
   const files = review ? [] : readAttachments(opts.file, cwd, false);
+  let discussion = null;
+  if (ctx.kind === 'discuss') {
+    try { discussion = discussionPolicy(ctx, files); } catch (e) { die(e.message); }
+  }
+  if (discussion && !discussion.paths.length) access = 'none';
   let prompt;
   if (review) {
     const scope = ctx.reviewScope;
@@ -191,8 +198,9 @@ async function executePi(ctx) {
     ? `${brief}${focusFiles(files)}\n\n${M.resumeFooter}\n\n${M.opencodeRunResumeFooter}\n`
     : `${brief}\n\n${M.footer(cwd, ctx.addDirs || [])}\n\n${M.opencodeRunFooter(schemaText, access)}\n`;
   else prompt = `${brief}${focusFiles(files)}\n\n${ctx.parent ? M.opencodeResumeFooter : M.opencodeDiscussFooter(cwd, schemaText)}\n`;
+  if (discussion) prompt += `\n${discussionLimitsPrompt(discussion, cwd)}\n`;
   const { id, dir, release } = await newRunDir();
-  const context = { ...ctx, id, dir, release, prompt };
+  const context = { ...ctx, id, dir, release, prompt, discussion };
   if (exec) return execute(context, {
     capabilities, describe: () => ({ sandbox: null, modelShown: model, modelName: model }),
     run: ({ run }) => piSession(run, schema, access),
@@ -246,13 +254,14 @@ async function piSession(run, schema, access) {
     }
     writeMeta();
   };
+  if (ctx.discussion) { meta.discussion_limits = ctx.discussion; writeMeta(); }
   const event = eventWriter(dir);
   for (const file of ['events.jsonl', 'pi.jsonl', 'stderr.log']) fs.writeFileSync(path.join(dir, file), '');
   const errors = [], warnings = [], notes = [];
   const observed = { messages: [], questions: [] };
-  const usage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 };
+  const usage = emptyUsage();
   const fileChanges = new Set(), started_tools = new Map();
-  let cost = 0, commands = 0, items = 0, repairing = false, last = '', report = null, thinkingLevel = null;
+  let cost = null, commands = 0, items = 0, repairing = false, last = '', report = null, thinkingLevel = null;
   // 流式输出的字数；完整内容要等 message_end 才写进时间线，这期间每隔几秒写一条进度，免得看起来像卡住了。
   const stream = { thinking: 0, text: 0, at: 0 };
   // 翻译成 Codex 的事件形状，让 watch 和 status 共用现有的时间线、命令和报告显示。
@@ -306,15 +315,16 @@ async function piSession(run, schema, access) {
     // 格式修复用同一个会话，不开任何工具。
     const current = repairing ? 'none' : access;
     const out = await runPi({ agent, args: piArgs({ model, effort, access: current, session: meta.native_session_file, sessionDir: native.dir, name: meta.title || `foreman ${ctx.kind}` }),
-      cwd, access: current, prompt: nextPrompt, runDir: dir, onEvent: translate, timeoutMs: deadline - Date.now(), stallMin });
+      cwd, access: current, discussion: ctx.discussion, prompt: nextPrompt, runDir: dir, onEvent: translate, timeoutMs: deadline - Date.now(), stallMin });
     syncNative();
     errors.push(...out.errors);
     observed.questions.push(...out.questions);
     if (!repairing) observed.messages = out.messages;
-    for (const key of Object.keys(usage)) usage[key] += out.usage[key];
-    cost += out.cost;
+    mergeUsage(usage, out.usage);
+    cost = addAmount(cost, out.cost);
     thinkingLevel = out.thinkingLevel ?? thinkingLevel;
     meta.status = out.status;
+    if (out.questions.some((q) => q.source === 'discussion_limit')) meta.discussion_stop_reason = out.questions.find((q) => q.source === 'discussion_limit').question;
     return meta.status === 'done' ? { last, canRepair: !!meta.session_id } : null;
   };
   if (ctx.kind === 'review') await request();
@@ -332,7 +342,7 @@ async function piSession(run, schema, access) {
   // pi 遇到模型不支持的档位不报错，会悄悄换一档。
   if (effort != null && effort !== 'default' && thinkingLevel && thinkingLevel !== effort) notes.push(M.piEffortChanged(effort, thinkingLevel));
   fs.writeFileSync(path.join(dir, 'last-message.txt'), last);
-  return { usage: meta.session_id || usage.input_tokens ? usage : null, usage_scope: 'this_run', cost, commands, errors, notes, warnings, report, last, observed,
+  return { usage: hasUsage(usage) ? usage : null, usage_scope: 'this_run', cost, commands, errors, notes, warnings, report, last, observed,
     status: meta.status, code: meta.status === 'done' ? 0 : 1, sessionId: meta.session_id,
     fileChanges, images: [], messages: observed.messages, questions: observed.questions };
 }
