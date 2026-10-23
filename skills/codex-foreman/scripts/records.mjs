@@ -16,9 +16,11 @@ const HOST_SESSION = process.env.CODEX_THREAD_ID || null;
 
 
 let RUNS_ROOT;
+let WORKSPACE_ROOT;
 
 // 入口先加载配置，再搬记录目录和重写启动器，保持首次运行的副作用顺序。
 function initializeRecords(config, workspace = process.cwd()) {
+  WORKSPACE_ROOT = path.resolve(workspace);
   RUNS_ROOT = config.dispatch.runs_dir ? path.resolve(workspace, config.dispatch.runs_dir) : defaultRunsRoot();
   if (fs.existsSync(RUNS_ROOT)) writeWatchLauncher();
 }
@@ -240,4 +242,4 @@ function groupSummary(runs) {
 const readMeta = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8')); } catch { return null; } };
 const isRunning = (m) => m?.status === 'running' && pidAlive(m.pid);
 
-export { RUNS_ROOT, initializeRecords, CANCEL_FILE, UNFINISHED_STATUSES, HOST_SESSION, isCancelled, writeWatchLauncher, newRunDir, listRuns, findRun, describeActivity, groupRuns, checkAdmission, runEnd, runOutcome, groupTally, groupSummary, groupScopeOwner, readMeta, isRunning };
+export { WORKSPACE_ROOT, RUNS_ROOT, initializeRecords, CANCEL_FILE, UNFINISHED_STATUSES, HOST_SESSION, isCancelled, writeWatchLauncher, newRunDir, listRuns, findRun, describeActivity, groupRuns, checkAdmission, runEnd, runOutcome, groupTally, groupSummary, groupScopeOwner, readMeta, isRunning };

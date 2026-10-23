@@ -124,6 +124,7 @@ test('桌面实验 RPC 仍拒绝任意方法，不将元数据当执行结果', 
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { sandbox, baseConfig, json } from './helpers.mjs';
 import { initializeRecords } from '../skills/codex-foreman/scripts/records.mjs';
 
@@ -133,7 +134,10 @@ async function executeFixture(t, scenario = {}) {
   cfg.dispatch.runs_dir = path.join(h.cwd, '.runs');
   initializeRecords(cfg, h.cwd);
   const calls = [];
-  const ctx = { ...scenario.context, agent: { type: 'antigravity desktop', experimental: true }, agentName: 'desktop', model: 'gemini-4-argon-medium', kind: 'review', mode: 'review', cwd: h.cwd, brief: '分析测试', opts: { file: [], timeout: scenario.timeout || 0.1 }, cfg, level: 'complex', ...scenario.context };
+  const executionCwd = scenario.nestedCwd ? path.join(h.cwd, 'review sandbox 材料') : h.cwd;
+  fs.mkdirSync(executionCwd, { recursive: true });
+  if (scenario.nestedCwd) fs.writeFileSync(path.join(executionCwd, 'material.txt'), '来自执行目录的材料');
+  const ctx = { ...scenario.context, agent: { type: 'antigravity desktop', experimental: true }, agentName: 'desktop', model: 'gemini-4-argon-medium', kind: 'review', mode: 'review', cwd: executionCwd, brief: '分析测试', opts: { file: [], timeout: scenario.timeout || 0.1 }, cfg, level: 'complex', ...scenario.context };
   let polls = 0;
   const oldExit = process.exitCode;
   try {
@@ -241,6 +245,7 @@ test('桌面 resume 复用空闲会话，仅返回新增 steps 与 generator usa
   const { result, calls } = await executeFixture(t, { context: { mode: 'resume', parent: 'old-run', sessionId: 'saved-cascade' }, trajectory: poll => ({ status: 'CASCADE_RUN_STATUS_IDLE', trajectory: { steps: poll === 1 ? [oldStep] : [oldStep, newStep], generatorMetadata: poll === 1 ? [oldGenerator] : [oldGenerator, newGenerator] } }) });
   assert.equal(result.status, 'done');
   assert.equal(result.session_id, 'saved-cascade');
+  assert.deepEqual(json(path.join(result.run_dir, 'meta.json')).desktop_workspace, { assignment: 'preserved_existing_session', requested_uri: null, workspace: null });
   assert.equal(result.last_message, '本轮新回复');
   assert.equal(result.usage.input_tokens, 5);
   assert.equal(result.usage.output_tokens, 6);
@@ -287,4 +292,24 @@ test('桌面任一本轮 generator native 模型不匹配必须失败，不能�
   const { result, calls } = await executeFixture(t, { trajectory: (_poll, calls) => ({ status: 'CASCADE_RUN_STATUS_IDLE', trajectory: { steps: [{ plannerResponse: { response: '公开回答' } }], generatorMetadata: [{ chatModel: { model: 'NATIVE_GEMINI_4' } }, { chatModel: { model: 'NATIVE_FLASH' } }] } }) });
   assert.equal(result.status, 'failed');
   assert.ok(calls.some(c => c.method === 'CancelCascadeInvocation'));
+});
+
+
+test('桌面新会话归属主工作区，临时 cwd 仍用于材料和快照', async (t) => {
+  const { result, calls, h } = await executeFixture(t, {
+    nestedCwd: true,
+    context: { opts: { file: ['material.txt'], timeout: 0.1 } },
+    onSend: h => fs.writeFileSync(path.join(h.cwd, 'review sandbox 材料', 'changed.txt'), 'changed'),
+  });
+  const executionCwd = path.join(h.cwd, 'review sandbox 材料');
+  const uri = pathToFileURL(h.cwd + path.sep).href;
+  assert.deepEqual(calls.find(c => c.method === 'StartCascade').body.overrideWorkspaceUris, [uri]);
+  const prompt = calls.find(c => c.method === 'SendUserCascadeMessage').body.items[0].text;
+  assert.ok(prompt.includes(executionCwd));
+  assert.equal(result.files[0].path, path.join(executionCwd, 'material.txt'));
+  assert.equal(result.cwd, executionCwd);
+  assert.equal(result.status, 'failed');
+  assert.match(result.errors.join('\n'), /修改了工作区/);
+  assert.deepEqual(json(path.join(result.run_dir, 'meta.json')).desktop_workspace,
+    { assignment: 'main_workspace', requested_uri: uri, workspace: h.cwd });
 });

@@ -86,7 +86,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SCHEMA, DISCUSS_SCHEMA } from '../config.mjs';
-import { newRunDir, isCancelled } from '../records.mjs';
+import { WORKSPACE_ROOT, newRunDir, isCancelled } from '../records.mjs';
 import { startRun, finishDiscussion, eventWriter, runLimits, parseReport, validateSchema } from '../runner.mjs';
 import { makeTracker } from '../tracker.mjs';
 import { readAttachments, focusFiles } from '../util.mjs';
@@ -122,6 +122,9 @@ export async function executeDesktop(ctx, { discover = discoverDesktop, transpor
   const context = { ...ctx, ...await newRunDir(), prompt };
   const run = startRun(context), { meta, writeMeta } = run;
   const event = eventWriter(context.dir), { deadline } = runLimits(ctx, run.started);
+  meta.desktop_workspace = ctx.sessionId
+    ? { assignment: 'preserved_existing_session', requested_uri: null, workspace: null }
+    : { assignment: 'main_workspace', requested_uri: pathToFileURL(path.resolve(WORKSPACE_ROOT) + path.sep).href, workspace: WORKSPACE_ROOT };
   meta.experimental = true; meta.permission_policy = { isolation: 'none', hard_read_only: false, force_disable_tool_calling_requested: true }; meta.requested_native_model = selected.model; meta.model_verification = 'requested_only'; writeMeta();
   fs.writeFileSync(path.join(context.dir, 'brief.md'), prompt);
   let tracker, before, last = '', errors = [], status = 'failed', cancelRequested = false, baselineSteps = 0, baselineGenerators = 0, usage = null, ownsInvocation = false, emptyIdlePolls = 0;
@@ -135,7 +138,7 @@ export async function executeDesktop(ctx, { discover = discoverDesktop, transpor
       baselineSteps = baseline.trajectory?.steps?.length || 0;
       baselineGenerators = baseline.trajectory?.generatorMetadata?.length || 0;
       created = { cascadeId: ctx.sessionId };
-    } else created = await transport.request('StartCascade', { source: 'CORTEX_TRAJECTORY_SOURCE_AGENT_API', requestedModel: selected.model, overrideWorkspaceUris: [pathToFileURL(ctx.cwd + path.sep).href] });
+    } else created = await transport.request('StartCascade', { source: 'CORTEX_TRAJECTORY_SOURCE_AGENT_API', requestedModel: selected.model, overrideWorkspaceUris: [meta.desktop_workspace.requested_uri] });
     if (!created.cascadeId) throw new Error('StartCascade 未返回 cascadeId。');
     meta.session_id = created.cascadeId; ownsInvocation = true; writeMeta();
     if (isCancelled(context.dir)) { cancelRequested = true; throw new Error('任务在发送推理前已收到取消请求。'); }
