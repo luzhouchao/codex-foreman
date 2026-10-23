@@ -18,13 +18,20 @@ export const piUsage = (u) => ({
 export function recoverUsage(dir, type) {
   const usage = emptyUsage();
   let cost = null;
-  const file = type === 'pi cli' ? 'pi.jsonl' : type === 'opencode cli' ? 'opencode.jsonl' : 'events.jsonl';
+  const file = type === 'pi cli' ? 'pi.jsonl' : type === 'opencode cli' ? 'opencode.jsonl' : type === 'antigravity cli' ? 'antigravity.jsonl' : 'events.jsonl';
   let text;
   try { text = fs.readFileSync(path.join(dir, file), 'utf8'); } catch { return { usage: null, cost_usd: null }; }
   for (const line of text.split('\n').slice(0, -1)) {
     let event;
     try { event = JSON.parse(line); } catch { continue; }
-    if (type === 'pi cli') {
+    if (type === 'antigravity cli') {
+      const eventType = event.event || event.type;
+      event = { ...event, ...(event[eventType] && typeof event[eventType] === 'object' ? event[eventType] : {}), type: eventType };
+      if ((event.type === 'result' || event.type === 'step_update') && event.usage) {
+        const u = event.usage;
+        Object.assign(usage, { input_tokens: amount(u.input_tokens ?? u.inputTokens ?? u.promptTokenCount), cached_input_tokens: amount(u.cached_input_tokens ?? u.cache_read_tokens ?? u.cachedInputTokens ?? u.cachedContentTokenCount), output_tokens: amount(u.output_tokens ?? u.outputTokens ?? u.candidatesTokenCount), reasoning_output_tokens: amount(u.reasoning_output_tokens ?? u.thinking_tokens ?? u.reasoningTokens ?? u.thoughtsTokenCount) });
+      }
+    } else if (type === 'pi cli') {
       const u = event.type === 'message_end' && event.message?.role === 'assistant' ? event.message.usage
         : event.type === 'compaction_end' ? event.result?.usage : null;
       if (u) { addUsage(usage, piUsage(u)); cost = addAmount(cost, amount(u.cost?.total)); }
@@ -34,5 +41,5 @@ export function recoverUsage(dir, type) {
       cost = addAmount(cost, amount(event.part?.cost));
     } else if (event.type === 'api.usage' || event.type === 'turn.completed') addUsage(usage, event.usage);
   }
-  return { usage: hasUsage(usage) ? usage : null, cost_usd: cost, usage_scope: 'this_run', usage_partial: true };
+  return { usage: hasUsage(usage) ? usage : null, cost_usd: cost, usage_scope: type === 'antigravity cli' ? 'session_total' : 'this_run', usage_partial: true };
 }

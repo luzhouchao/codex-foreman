@@ -3,6 +3,17 @@ const CODEX_SUBCOMMANDS = new Set(['exec', 'e', 'review']);
 // pi 除了下面这些用法都会运行模型：查询类参数（要在 -- 之前），以及放在第一个位置的管理类子命令。
 const PI_QUERY_FLAGS = new Set(['--version', '-v', '--help', '-h', '--list-models', '--export']);
 const PI_ADMIN = new Set(['install', 'remove', 'uninstall', 'update', 'list', 'config', 'auth', 'mcp']);
+const AGY_ADMIN = new Set(['models', 'install', 'update', 'auth', 'login', 'logout', 'version', 'help']);
+const AGY_VALUES = new Set(['-p', '--print', '--prompt', '--model', '--effort', '--conversation', '--mode', '--output-format', '--input-format', '--log-file', '--print-timeout', '--json-schema', '--project', '--add-dir']);
+function agyRunsModel(words) {
+  if (AGY_ADMIN.has(words[0])) return false;
+  for (let i = 0; i < words.length; i++) {
+    if (words[i] === '--') return true;
+    if (['--help', '-h', '--version', '-v'].includes(words[i])) return false;
+    if (AGY_VALUES.has(words[i])) i++;
+  }
+  return true;
+}
 // 带一个值的选项：值不能当成子命令或查询参数。
 const PI_VALUE_OPTIONS = new Set(['--provider', '--model', '--api-key', '--system-prompt', '--append-system-prompt', '--mode', '--session', '--session-id',
   '--fork', '--session-dir', '--name', '-n', '--models', '--tools', '-t', '--exclude-tools', '-xt', '--thinking', '--extension', '-e', '--skill',
@@ -65,9 +76,15 @@ function callsAgentDirectly(command) {
     let i = 0;
     while (i < tokens.length && /^\w+=/.test(tokens[i])) i++; // 跳过 VAR=value 前缀
     const first = base(tokens[i] || '');
+    if (/^agentapi(\.exe|\.cmd|\.bat|\.ps1)?$/.test(first) || (/^language_server(\.exe)?$/.test(first) && (tokens[i + 1] || '').replace(/["']/g, '') === 'agentapi')) {
+      const args = tokens.slice(i + (/^language_server/.test(first) ? 2 : 1)).map((t) => t.replace(/^["']|["']$/g, ''));
+      if (['new-conversation', 'send-message'].includes(args[0])) return true;
+      continue;
+    }
     let rest;
-    let opencode = false, pi = false;
-    if (/^codex(\.exe|\.cmd|\.ps1)?$/.test(first)) rest = tokens.slice(i + 1);
+    let opencode = false, pi = false, agy = false;
+    if (/^agy(\.exe|\.cmd|\.ps1)?$/.test(first)) { rest = tokens.slice(i + 1); agy = true; }
+    else if (/^codex(\.exe|\.cmd|\.ps1)?$/.test(first)) rest = tokens.slice(i + 1);
     else if (/^node(\.exe)?$/.test(first) && base(tokens[i + 1] || '') === 'codex.js') rest = tokens.slice(i + 2);
     else if (/^npx(\.cmd)?$/.test(first) && /^(@openai\/codex|codex)(@.*)?$/.test((tokens[i + 1] || '').replace(/["']/g, ''))) rest = tokens.slice(i + 2);
     else if (/^opencode(\.exe|\.cmd|\.ps1)?$/.test(first)) { rest = tokens.slice(i + 1); opencode = true; }
@@ -77,6 +94,10 @@ function callsAgentDirectly(command) {
     else if (/^npx(\.cmd)?$/.test(first) && /^@earendil-works\/pi-coding-agent(@.*)?$/.test(npxPackage(tokens, i).pkg)) { rest = tokens.slice(npxPackage(tokens, i).rest); pi = true; }
     else continue;
     const words = rest.map((t) => t.replace(/^["']|["']$/g, ''));
+    if (agy) {
+      if (agyRunsModel(words)) return true;
+      continue;
+    }
     if (pi) {
       if (piRunsModel(words)) return true;
       continue;

@@ -71,6 +71,10 @@ async function cmdCancel(o) {
       break;
     }
   }
+  if (agentTypeOf(run.meta) === 'antigravity desktop') {
+    const m = readMeta(run.dir) || run.meta;
+    print({ ok: false, status: m.status, cancel_requested: true, remote_cancel_confirmed: m.remote_cancel_confirmed ?? false, error: 'Desktop 远端任务取消尚未确认；保留轮询进程，不强制终止共享服务。' }); process.exitCode = 1; return;
+  }
   const killed = killTree(run.meta.pid);
   for (let i = 0; i < 20 && pidAlive(run.meta.pid); i++) await sleep(100);
   if (pidAlive(run.meta.pid)) { print({ ok: false, status: 'running', cancel_requested: true, error: killed ? '进程尚未退出，取消结果未确认' : '终止进程失败' }); process.exitCode = 1; return; }
@@ -115,7 +119,7 @@ async function cmdAwaitBusy(o, config) {
   const after = Number(o.after ?? config.dispatch.busy_ask_min);
   const print = (x) => process.stdout.write(`${JSON.stringify(x, null, 2)}\n`);
   const pick = () => (o.group != null ? groupRuns(o.group, Date.now() - 86400000) : [findRun(o.run)]);
-  if (!(after > 0)) { const running = pick().filter((run) => isRunning(run.meta)); print({ busy: [], running: running.map((r) => r.id), done: !running.length, all_done: !running.length, disabled: true, queue_monitor_scope: 'api', unmonitored_running: running.filter((r) => ['pi cli', 'opencode cli'].includes(agentTypeOf(r.meta))).map((r) => r.id) }); return; }
+  if (!(after > 0)) { const running = pick().filter((run) => isRunning(run.meta)); print({ busy: [], running: running.map((r) => r.id), done: !running.length, all_done: !running.length, disabled: true, queue_monitor_scope: 'api', unmonitored_running: running.filter((r) => ['pi cli', 'opencode cli', 'antigravity cli', 'antigravity desktop'].includes(agentTypeOf(r.meta))).map((r) => r.id) }); return; }
   // 刚派出的任务可能还没登记，最多等 30 秒
   for (let waited = 0; o.group != null && !pick().length; waited += 1000) {
     if (waited >= 30000) { print({ busy: [], running: [], done: true, all_done: true, queue_monitor_scope: 'api', unmonitored_running: [] }); return; }
@@ -123,7 +127,7 @@ async function cmdAwaitBusy(o, config) {
   }
   for (;;) {
     const running = pick().filter((run) => isRunning(run.meta));
-    const monitored = running.filter((run) => !['opencode cli', 'pi cli'].includes(agentTypeOf(run.meta)));
+    const monitored = running.filter((run) => !['opencode cli', 'pi cli', 'antigravity cli', 'antigravity desktop'].includes(agentTypeOf(run.meta)));
     const busy = monitored.map((run) => ({ run, s: queuedSeconds(run.dir) })).filter((x) => x.s != null && x.s >= after * 60);
     if (busy.length || !running.length) {
       print({

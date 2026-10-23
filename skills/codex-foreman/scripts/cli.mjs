@@ -81,6 +81,8 @@ async function cmdResume(o) {
     if (round > max) die(M.discussRoundsExceeded(rootId, done, max));
   }
   const brief = readBrief(o);
+  // Desktop 精确模型属于会话选择，续接显式继承父任务；--model 仍可覆盖。
+  if (agentTypeOf(parent.meta) === 'antigravity desktop' && !o.model) o.model = parent.meta.model;
   // 什么模型都没配置时沿用上一轮记录的模型，同一会话不中途换模型。
   const profile = pickProfile(cfg, o, discuss ? 'discuss' : 'run', adapters, parent.meta.model, parent.meta.agent || 'codex');
   return adapters[profile.agent.type].execute({ cfg, ...profile, mode: 'resume', kind, cwd: parent.meta.cwd, brief,
@@ -210,13 +212,13 @@ async function cmdModels() {
   const cfg = load(null);
   const out = { tools: {}, api: {}, agents: {} };
   const readCatalog = catalogReader();
-  for (const type of ['codex cli', 'opencode cli', 'pi cli']) {
-    out.tools[type] = readCatalog(Object.values(cfg.agents).find((a) => a.type === type) || { type });
+  for (const type of ['codex cli', 'opencode cli', 'pi cli', 'antigravity cli', 'antigravity desktop']) {
+    out.tools[type] = await readCatalog(Object.values(cfg.agents).find((a) => a.type === type) || { type });
   }
   for (const [name, agent] of Object.entries(cfg.agents)) if (agent.type === 'api') out.api[name] = await adapters.api.catalog(agent);
   // 配置里每个协作方的模型在不在它自己那个可执行文件的清单里，在的话支持哪些推理强度；不在的给出最接近的写法。
   for (const [name, agent] of Object.entries(cfg.agents)) {
-    const cat = agent.type === 'api' ? out.api[name] : readCatalog(agent);
+    const cat = agent.type === 'api' ? out.api[name] : await readCatalog(agent);
     const model = agent.model ?? adapters[agent.type].status(agent).model ?? null;
     const found = cat.ok ? cat.models.find((m) => m.id === model) : null;
     out.agents[name] = { type: agent.type, model, listed: cat.ok && model ? !!found : null, efforts: found?.efforts ?? null,

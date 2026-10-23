@@ -2,6 +2,8 @@
 
 让 Codex 负责规划与验收，把任务交给 pi、opencode 等本机 CLI。基于 [DaydayupV/claude-foreman](https://github.com/DaydayupV/claude-foreman) 的 MIT 执行器移植，保留执行、续接、讨论、审查、状态、实时日志及取消能力。
 
+Codex Foreman 0.5.0 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
+
 ## 安装
 
 需要 Node.js 18+、Git，以及已经安装并登录的 pi 或 opencode。

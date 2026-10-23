@@ -43,3 +43,5 @@ run、review、discuss 各有 simple、normal、complex。值为 "codex host" �
 - 项目配置只能收紧这些上限，命令参数不得突破项目上限。
 
 用 `--scope` / `--file` 限定相关路径；未指定时仅讨论已有材料。pi 的文件工具守卫执行限制，超限停止为 needs_input，由主控决定是否继续。grep 需明确到文件，避免一次目录全文搜索绕过文件计数。pi 预载说明、历史上下文不在工具预算内；这些参数不提供 token 或费用总量封顶。
+
+Antigravity 桌面类型为 `antigravity desktop`，需显式设置 `experimental: true`。配置示例与兼容边界见 [桌面接入说明](antigravity.md)。

@@ -55,7 +55,7 @@ function spawnCli(file, args, options, { onInput, busy = () => false, onStderrLi
 
 function collectQuestions({ mode, kind, agent_type, report, last = '', messages = [], questions = [] }) {
   // 没有原生审查的 CLI（opencode、pi）审查时只交回文字，不按提问收集。
-  const review = kind === 'review' && ['opencode cli', 'pi cli'].includes(agent_type);
+  const review = kind === 'review' && ['opencode cli', 'pi cli', 'antigravity cli'].includes(agent_type);
   const permissions = new Set();
   const collected = questions.filter((q) => {
     if (q.source !== 'permission_denied') return true;
@@ -83,7 +83,7 @@ function startRun(ctx, { started = Date.now(), track = [], modelShown = ctx.mode
   const meta = {
     id, mode, kind, title: ctx.title || null, cwd, model, model_shown: modelShown, model_name: modelName, level, effort,
     agent: agentName, agent_type: agent.type, sandbox, parent: ctx.parent || null,
-    ...(kind === 'exec' && ctx.isolation === 'tools' ? { isolation: ctx.isolation, run_access: agent.run_access } : {}),
+    ...(kind === 'exec' && ['tools', 'none'].includes(ctx.isolation) ? { isolation: ctx.isolation, run_access: agent.run_access } : {}),
     track, group: opts.group ?? null, scope: opts.scope, round: ctx.round ?? null,
     started_at: new Date(started).toISOString(), status: 'running', pid: process.pid, session_id: ctx.sessionId || null,
     host_session: HOST_SESSION,
@@ -137,14 +137,14 @@ function finishRun(run, result, code = result.exit_code, observed = {}) {
   return result;
 }
 
-function finishDiscussion(run, { usage, cost, commands = 0, errors, notes, warnings, report, last, files, changesNote, observed = {} }) {
+function finishDiscussion(run, { usage, usage_scope = 'this_run', usage_partial = false, cost, commands = 0, errors, notes, warnings, report, last, files, changesNote, observed = {} }) {
   const { ctx, meta, started } = run;
   const { id, dir, mode, cwd, agentName, agent, model, level, effort } = ctx;
   meta.ended_at = new Date().toISOString();
   return finishRun(run, {
     run_id: id, mode, kind: ctx.kind, status: meta.status, title: meta.title, cwd, track: [], group: meta.group, round: meta.round, scope: meta.scope,
     agent: agentName, agent_type: agent.type, model, model_shown: meta.model_shown, level, effort, sandbox: null, parent: meta.parent, session_id: meta.session_id,
-    exit_code: meta.status === 'done' ? 0 : 1, duration_s: Math.round((Date.now() - started) / 1000), usage, usage_scope: 'this_run',
+    exit_code: meta.status === 'done' ? 0 : 1, duration_s: Math.round((Date.now() - started) / 1000), usage, usage_scope, ...(usage_partial ? { usage_partial: true } : {}),
     cost_usd: cost ?? null,
     last_request: null, rate_limit: null, quota_resets_at: null, commands_executed: commands, errors, notes, warnings, report,
     last_message: report ? undefined : last, changes: { available: false, note: changesNote },
@@ -325,6 +325,7 @@ async function execute(ctx, { run: runAgent, stats: sessionStats = () => null, d
     duration_s: Math.round((Date.now() - started) / 1000),
     usage,
     usage_scope: r.usage_scope ?? (total ? (baseline ? 'this_run' : 'session_total') : null),
+    ...(r.usage_partial ? { usage_partial: true } : {}),
     last_request: stats?.last_request || null,
     rate_limit: stats?.rate_limit || null,
     quota_resets_at: quotaResetsAt,

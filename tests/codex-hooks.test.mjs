@@ -4,6 +4,26 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildHooks, mergeHooks } from '../tools/hook-config.mjs';
 const hook = (name, input) => spawnSync(process.execPath, [fileURLToPath(new URL(`../skills/codex-foreman/hooks/${name}.mjs`, import.meta.url))], { input: JSON.stringify(input), encoding: 'utf8', windowsHide: true });
+test('桌面 agentapi 任务保留 Foreman 路由，查询不拦截', () => {
+  for (const command of ['agentapi new-conversation hi', 'agentapi.bat send-message abc hi', '& "C:/app/language_server.exe" agentapi new-conversation hi']) {
+    const r = hook('pre-tool-use', { hook_event_name: 'PreToolUse', tool_name: 'exec_command', tool_input: { command } });
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  }
+  for (const command of ['agentapi --help', 'language_server.exe agentapi get-conversation-metadata abc']) {
+    const r = hook('pre-tool-use', { hook_event_name: 'PreToolUse', tool_name: 'exec_command', tool_input: { command } });
+    assert.equal(r.status, 0); assert.equal(r.stdout, '');
+  }
+});
+test('Antigravity 推理经 Foreman，管理查询放行', () => {
+  for (const command of ['agy -p "hi"', '& "C:/Users/demo/agy.exe" --prompt "--help"', 'agy --conversation abc -p hi']) {
+    const r = hook('pre-tool-use', { hook_event_name: 'PreToolUse', tool_name: 'exec_command', tool_input: { command } });
+    assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'deny');
+  }
+  for (const command of ['agy models', 'agy --version', 'agy --help', 'agy install --skip-aliases', 'echo "agy -p hi"']) {
+    const r = hook('pre-tool-use', { hook_event_name: 'PreToolUse', tool_name: 'exec_command', tool_input: { command } });
+    assert.equal(r.status, 0); assert.equal(r.stdout, '');
+  }
+});
 test('Codex SessionStart 返回上下文，不授权自动派活', () => {
   const r = hook('session-start', { hook_event_name: 'SessionStart', source: 'compact' });
   assert.equal(r.status, 0, r.stderr);

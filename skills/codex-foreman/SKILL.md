@@ -84,3 +84,7 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 结果中的未知用量与费用应报告“暂无数据”，不能视为零；已经返回的部分用量在失败或取消后仍有意义，上游填充的零值无法与真实零值再区分。
 
 用户要求清理时先运行 `cleanup --workspace "<主工作区>" --group <组名>` 或 `--before YYYY-MM-DD` 查看候选，已获删除授权后再加 `--apply`。只清理工作区 `.codex/foreman/runs`；活跃任务、查看器或不明状态阻止清理，不绕过检查。此命令不删除内置对话、native-tasks、讨论汇总、更新材料或配置。
+
+## Antigravity 桌面协作
+
+实验性桌面适配支持 discuss、review 和 discuss 续接。先启动并登录官方桌面，再配置精确模型 ID 和 experimental: true。暂不支持 run；请求禁用工具，并核验工作区前后快照，不提供系统级只读隔离。用法见 [桌面接入说明](references/antigravity.md)。
