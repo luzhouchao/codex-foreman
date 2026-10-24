@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import desktop, { createDesktopTransport, desktopCatalog, checkDesktop, desktopUsage } from '../skills/codex-foreman/scripts/adapters/antigravity-desktop.mjs';
+import desktop, { createDesktopTransport, desktopCatalog, checkDesktop, desktopUsage, ensureDesktopProject, desktopWorkspaceKey } from '../skills/codex-foreman/scripts/adapters/antigravity-desktop.mjs';
 
 // 只模拟已证实的只读目录 RPC；不模拟生成回答或取消成功。
 const SECRET = 'synthetic-csrf-never-log';
@@ -31,7 +31,7 @@ test('桌面传输拒绝远程地址、外观相似域名和缺少 CSRF', async 
 test('桌面传输仅允许只读目录 RPC，不能用 check 发送推理或取消', async () => {
   const calls = [];
   const transport = createDesktopTransport({ endpoint, token: SECRET, fetchImpl: async (...args) => { calls.push(args); return response({ response: { models: [] } }); } });
-  for (const method of ['StartCascade', 'SendUserCascadeMessage', 'CancelCascadeInvocation', 'GetUserStatus', '../StartCascade']) {
+  for (const method of ['StartCascade', 'SendUserCascadeMessage', 'CancelCascadeInvocation', 'GetUserStatus', 'ListProjects', 'ReadProject', 'CreateProject', '../StartCascade']) {
     await assert.rejects(async () => transport.request(method));
   }
   assert.equal(calls.length, 0);
@@ -146,7 +146,9 @@ async function executeFixture(t, scenario = {}) {
       transportFactory: () => ({ request: async (method, body) => {
         calls.push({ method, body });
         if (method === 'GetAvailableModels') return catalogData;
-        if (method === 'StartCascade') return { cascadeId: 'synthetic-cascade' };
+        if (method === 'ListProjects') return { projectIds: ['fixture-project'] };
+        if (method === 'ReadProject') return { project: { id: 'fixture-project', name: 'fixture', projectResources: { resources: [{ folderUri: pathToFileURL(h.cwd).href }] } } };
+        if (method === 'StartCascade') return { cascadeId: 'synthetic-cascade', projectEnvInfo: { workspaceUris: [pathToFileURL(h.cwd).href] } };
         if (method === 'SendUserCascadeMessage') { scenario.onSend?.(h); return {}; }
         if (method === 'CancelCascadeInvocation') { scenario.onCancel?.(h); return {}; }
         if (method === 'GetCascadeTrajectory') {
@@ -249,7 +251,7 @@ test('桌面 resume 复用空闲会话，仅返回新增 steps 与 generator usa
   assert.equal(result.last_message, '本轮新回复');
   assert.equal(result.usage.input_tokens, 5);
   assert.equal(result.usage.output_tokens, 6);
-  assert.equal(calls.some(c => c.method === 'StartCascade'), false);
+  assert.equal(calls.some(c => ['StartCascade', 'ListProjects', 'ReadProject', 'CreateProject'].includes(c.method)), false);
   assert.equal(calls.find(c => c.method === 'SendUserCascadeMessage').body.cascadeId, 'saved-cascade');
 });
 
@@ -303,7 +305,8 @@ test('桌面新会话归属主工作区，临时 cwd 仍用于材料和快照', 
   });
   const executionCwd = path.join(h.cwd, 'review sandbox 材料');
   const uri = pathToFileURL(h.cwd + path.sep).href;
-  assert.deepEqual(calls.find(c => c.method === 'StartCascade').body.overrideWorkspaceUris, [uri]);
+  assert.deepEqual(calls.find(c => c.method === 'StartCascade').body.projectEnvConfig, { projectId: 'fixture-project', defaultProjectEnvironment: {} });
+  assert.equal(calls.find(c => c.method === 'StartCascade').body.overrideWorkspaceUris, undefined);
   const prompt = calls.find(c => c.method === 'SendUserCascadeMessage').body.items[0].text;
   assert.ok(prompt.includes(executionCwd));
   assert.equal(result.files[0].path, path.join(executionCwd, 'material.txt'));
@@ -312,4 +315,71 @@ test('桌面新会话归属主工作区，临时 cwd 仍用于材料和快照', 
   assert.match(result.errors.join('\n'), /修改了工作区/);
   assert.deepEqual(json(path.join(result.run_dir, 'meta.json')).desktop_workspace,
     { assignment: 'main_workspace', requested_uri: uri, workspace: h.cwd });
+});
+
+
+test('Project 按完整路径复用，大小写、编码与尾分隔符一致，同名异路径新建并回读', async () => {
+  assert.equal(desktopWorkspaceKey('file:///e%3A/subagent/'), desktopWorkspaceKey('file:///E:/SUBAGENT'));
+  const projects = [{ id: 'other', name: 'subagent', projectResources: { resources: [{ folderUri: 'file:///D:/subagent' }] } }];
+  const calls = [];
+  const transport = { request: async (method, body) => {
+    calls.push(method);
+    if (method === 'ListProjects') return { projectIds: projects.map(p => p.id) };
+    if (method === 'ReadProject') return { project: projects.find(p => p.id === body.id) };
+    if (method === 'CreateProject') { projects.push(body.project); return {}; }
+    throw new Error(method);
+  } };
+  const first = await ensureDesktopProject(transport, 'E:\\subagent');
+  assert.equal(first.created, true);
+  assert.equal(first.name, 'subagent');
+  assert.equal(projects[1].isWorkspaceOnly, false);
+  const [second, concurrent] = await Promise.all([ensureDesktopProject(transport, 'E:\\subagent'), ensureDesktopProject(transport, 'E:\\subagent')]);
+  assert.equal(concurrent.id, first.id);
+  assert.equal(second.id, first.id);
+  assert.equal(second.created, false);
+  assert.equal(calls.filter(m => m === 'CreateProject').length, 1);
+});
+
+test('项目列表或读取失败时拒绝创建，重复完整路径拒绝猜测', async () => {
+  await assert.rejects(ensureDesktopProject({ request: async () => ({ error: 'bad response' }) }, 'E:\\subagent'), /列表/);
+  await assert.rejects(ensureDesktopProject({ request: async method => method === 'ListProjects' ? { projectIds: ['broken'] } : { errorMessage: 'unreadable' } }, 'E:\\subagent'), /元数据/);
+  await assert.rejects(ensureDesktopProject({ request: async method => method === 'ListProjects' ? { projectIds: ['a', 'b'] } : { project: { id: 'x', projectResources: { resources: [{ folderUri: 'file:///E:/subagent' }] } } } }, 'E:\\subagent'), /多个/);
+});
+
+
+test('Project 实际轨迹归属不一致时失败并取消自己创建的会话', async (t) => {
+  const { result, calls } = await executeFixture(t, { trajectory: () => ({ status: 'CASCADE_RUN_STATUS_IDLE', trajectory: { metadata: { projectId: 'wrong-project' }, steps: [{ plannerResponse: { response: '错误归属' } }] } }) });
+  assert.equal(result.status, 'failed');
+  assert.match(result.errors.join(' '), /实际 Project/);
+  assert.ok(calls.some(c => c.method === 'CancelCascadeInvocation'));
+});
+
+
+test('隐藏 workspace-only 项目不作为 UI Project 复用，空 ProtoJSON 列表允许首次创建', async () => {
+  for (const empty of [false, true]) {
+    const projects = empty ? [] : [{ id: 'hidden-workspace', name: 'subagent', isWorkspaceOnly: true, projectResources: { resources: [{ folderUri: 'file:///E:/subagent' }] } }];
+    let created = 0;
+    const transport = { request: async (method, body) => {
+      if (method === 'ListProjects') return projects.length ? { projectIds: projects.map(p => p.id) } : {};
+      if (method === 'ReadProject') return { project: projects.find(p => p.id === body.id) };
+      if (method === 'CreateProject') { created++; projects.push(body.project); return {}; }
+      throw new Error(method);
+    } };
+    const result = await ensureDesktopProject(transport, 'E:\\subagent');
+    assert.equal(result.created, true);
+    assert.notEqual(result.id, 'hidden-workspace');
+    assert.equal(created, 1);
+    assert.equal(projects.at(-1).isWorkspaceOnly, false);
+    const reused = await ensureDesktopProject(transport, 'E:\\subagent');
+    assert.equal(reused.id, result.id);
+    assert.equal(created, 1);
+  }
+});
+
+test('错误或畸形 ListProjects 响应不能伪装成空列表触发创建', async () => {
+  for (const malformed of [null, [], { error: 'failed' }, { code: 'internal', message: 'failed' }, { projectIds: null }, { projectIds: 'id' }, { projectIds: [null] }]) {
+    const calls = [];
+    await assert.rejects(ensureDesktopProject({ request: async method => { calls.push(method); return malformed; } }, 'E:\\subagent'), /列表/);
+    assert.deepEqual(calls, ['ListProjects']);
+  }
 });

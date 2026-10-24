@@ -34,7 +34,7 @@ export function createDesktopTransport({ endpoint, token, fetchImpl = globalThis
   if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Desktop endpoint 必须是本机 127.0.0.1 HTTP 端口。');
   if (!token || typeof token !== 'string') throw new Error('Desktop CSRF token 不可为空。');
   return { async request(method, body = {}) {
-    if (!READ_METHODS.has(method) && !(experimental && ['StartCascade', 'SendUserCascadeMessage', 'GetCascadeTrajectory', 'CancelCascadeInvocation'].includes(method))) throw new Error('当前 Desktop transport 仅允许已验证的只读接口。');
+    if (!READ_METHODS.has(method) && !(experimental && ['StartCascade', 'SendUserCascadeMessage', 'GetCascadeTrajectory', 'CancelCascadeInvocation', 'ListProjects', 'ReadProject', 'CreateProject'].includes(method))) throw new Error('当前 Desktop transport 仅允许已验证的只读接口。');
     let response;
     try { response = await fetchImpl(`${url.origin}${SERVICE}${method}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Connect-Protocol-Version': '1', 'x-codeium-csrf-token': token }, body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(10000) }); }
     catch { throw new Error('Desktop 只读接口连接失败。'); }
@@ -84,7 +84,9 @@ export default {
 };
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { randomUUID, createHash } from 'node:crypto';
+import os from 'node:os';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { SCHEMA, DISCUSS_SCHEMA } from '../config.mjs';
 import { WORKSPACE_ROOT, newRunDir, isCancelled } from '../records.mjs';
 import { startRun, finishDiscussion, eventWriter, runLimits, parseReport, validateSchema } from '../runner.mjs';
@@ -92,6 +94,57 @@ import { makeTracker } from '../tracker.mjs';
 import { readAttachments, focusFiles } from '../util.mjs';
 
 const permissionWarning = '实验分析请求禁用模型工具调用，仅使用提供的任务材料；Desktop 权限由现有桌面策略决定；只读要求为提示词约束并以前后快照核验，不提供硬只读隔离。';
+
+// Verified against the official Desktop UI projectManagementFeature and protobuf descriptors.
+export function desktopWorkspaceKey(uri) {
+  try {
+    const url = new URL(uri);
+    if (url.protocol !== 'file:') return null;
+    return path.win32.normalize(fileURLToPath(url, { windows: true })).replace(/[\\/]+$/, '').toLowerCase();
+  } catch { return null; }
+}
+
+export async function ensureDesktopProject(transport, workspace) {
+  const key = desktopWorkspaceKey(pathToFileURL(path.resolve(workspace)).href);
+  const lockPath = path.join(os.tmpdir(), 'codex-foreman-agy-project-' + createHash('sha256').update(key || '').digest('hex') + '.lock');
+  const deadline = Date.now() + 15000;
+  let fd;
+  while (fd === undefined) {
+    try { fd = fs.openSync(lockPath, 'wx'); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (Date.now() >= deadline) throw new Error('Desktop Project 创建锁等待超时；请检查是否有其他 Foreman 进程仍在创建项目。');
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  try { return await ensureDesktopProjectLocked(transport, workspace); }
+  finally { fs.closeSync(fd); fs.unlinkSync(lockPath); }
+}
+
+async function ensureDesktopProjectLocked(transport, workspace) {
+  const uri = pathToFileURL(path.resolve(workspace)).href;
+  const key = desktopWorkspaceKey(uri);
+  if (!key) throw new Error('Desktop 主工作区必须是有效本地路径。');
+  const listed = await transport.request('ListProjects');
+  // ProtoJSON omits empty repeated fields; ListProjectsResponse has only project_ids.
+  if (!listed || typeof listed !== 'object' || Array.isArray(listed) || Object.keys(listed).some(key => key !== 'projectIds') || (listed.projectIds !== undefined && (!Array.isArray(listed.projectIds) || listed.projectIds.some(id => typeof id !== 'string' || !id)))) throw new Error('Desktop ListProjects 未返回有效项目列表。');
+  const matches = [];
+  for (const id of listed.projectIds || []) {
+    const result = await transport.request('ReadProject', { id });
+    if (result.notFoundOnDisk) continue;
+    if (!result.project || result.errorMessage) throw new Error('Desktop 无法读取项目元数据；拒绝创建重复项目。');
+    const project = result.project;
+    const resources = project.projectResources?.resources || [];
+    if (project.isWorkspaceOnly !== true && resources.length === 1 && desktopWorkspaceKey(resources[0].folderUri || resources[0].gitFolder?.folderUri) === key) matches.push(project);
+  }
+  if (matches.length > 1) throw new Error('Desktop 存在多个对应主工作区的 Project，拒绝猜测。');
+  if (matches.length) return { id: matches[0].id, name: matches[0].name, workspace_uri: uri, created: false };
+  const project = { id: randomUUID(), name: path.basename(path.resolve(workspace)), projectResources: { resources: [{ folderUri: uri }] }, settings: {}, isWorkspaceOnly: false };
+  await transport.request('CreateProject', { project });
+  const confirmed = await transport.request('ReadProject', { id: project.id });
+  if (confirmed.errorMessage || confirmed.notFoundOnDisk || confirmed.project?.id !== project.id || confirmed.project?.isWorkspaceOnly === true || desktopWorkspaceKey(confirmed.project?.projectResources?.resources?.[0]?.folderUri) !== key) throw new Error('Desktop 创建 Project 后未通过回读核验。');
+  return { id: project.id, name: confirmed.project.name, workspace_uri: uri, created: true };
+}
 
 export async function executeDesktop(ctx, { discover = discoverDesktop, transportFactory = createDesktopTransport } = {}) {
   if (ctx.opts?.['max-files'] != null || ctx.opts?.['max-tool-calls'] != null) throw new Error('Desktop 不支持硬文件/工具预算；不能忽略 --max-files/--max-tool-calls。');
@@ -138,15 +191,22 @@ export async function executeDesktop(ctx, { discover = discoverDesktop, transpor
       baselineSteps = baseline.trajectory?.steps?.length || 0;
       baselineGenerators = baseline.trajectory?.generatorMetadata?.length || 0;
       created = { cascadeId: ctx.sessionId };
-    } else created = await transport.request('StartCascade', { source: 'CORTEX_TRAJECTORY_SOURCE_AGENT_API', requestedModel: selected.model, overrideWorkspaceUris: [meta.desktop_workspace.requested_uri] });
+     } else {
+      meta.desktop_project = await ensureDesktopProject(transport, WORKSPACE_ROOT);
+      writeMeta();
+      created = await transport.request('StartCascade', { source: 'CORTEX_TRAJECTORY_SOURCE_AGENT_API', requestedModel: selected.model, projectEnvConfig: { projectId: meta.desktop_project.id, defaultProjectEnvironment: {} } });
+    }
     if (!created.cascadeId) throw new Error('StartCascade 未返回 cascadeId。');
     meta.session_id = created.cascadeId; ownsInvocation = true; writeMeta();
+    if (!ctx.sessionId && !created.projectEnvInfo?.workspaceUris?.some((uri) => desktopWorkspaceKey(uri) === desktopWorkspaceKey(meta.desktop_project.workspace_uri))) throw new Error('Desktop Project 会话工作区未通过核验。');
     if (isCancelled(context.dir)) { cancelRequested = true; throw new Error('任务在发送推理前已收到取消请求。'); }
     await transport.request('SendUserCascadeMessage', { cascadeId: meta.session_id, items: [{ text: prompt }], cascadeConfig: { plannerConfig: { requestedModel: { model: selected.model }, toolConfig: { forceDisableToolCalling: true } } }, blocking: false, propagateError: true });
     event({ type: 'thread.started', thread_id: meta.session_id });
     while (Date.now() < deadline) {
       const raw = await transport.request('GetCascadeTrajectory', { cascadeId: meta.session_id });
       const trajectory = raw.trajectory || {};
+      if (meta.desktop_project && trajectory.metadata?.projectId !== undefined && trajectory.metadata.projectId !== meta.desktop_project.id) throw new Error('Desktop 会话实际 Project 与请求不一致。');
+      if (meta.desktop_project && trajectory.metadata?.projectId === meta.desktop_project.id) { meta.desktop_project.assignment_verified = true; writeMeta(); }
       const allSteps = trajectory.steps || [];
       if (!Array.isArray(allSteps)) throw new Error('Desktop trajectory.steps 格式错误。');
       const steps = allSteps.slice(baselineSteps);
