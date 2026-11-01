@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5 — 2026-11-01
+
+- 新增 `update` 与 `update --check` 命令，支持在任意目录通过官方独立检出更新已安装技能，依赖 Node、Git 与网络。
+- 更新复用安装器备份与恢复机制，只替换托管程序并保留用户配置、记忆与历史，默认不改 hooks，相同 revision 提示 up_to_date，缺少旧 revision 时自动重新安装官方 main。
+- 首次自旧版本升级仍需运行源码安装器一次，更新后需手动重启已有服务以加载新程序。
+
 ## 0.6.2 — 2026-11-01
 
 - 移除自动开窗运行时。删除 auto-watch.mjs、watch-window.mjs 与 viewer-outcome.mjs。`dispatch.watch` 保留 `off` 与 `auto` 仅兼容旧配置，均不再自动开窗。任务进度以网页工作台为主要入口，可选保留手动 `watch`。

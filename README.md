@@ -2,7 +2,7 @@
 
 让 Codex 负责规划与验收，把任务交给 pi、opencode 等本机 CLI。基于 [DaydayupV/claude-foreman](https://github.com/DaydayupV/claude-foreman) 的 MIT 执行器移植，保留执行、续接、讨论、审查、状态、实时日志及取消能力。
 
-Codex Foreman 0.6.4 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
+Codex Foreman 0.6.5 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
 
 ## 安装
 
@@ -122,6 +122,33 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 讨论可采用主控独立意见加外部中立评议；材料集中给出、按任务选择参与人数、有实质分歧才开第二轮。例如可配置 DeepSeek max、GLM max、MiMo high 参与讨论，并由主控调用内置 gpt-6.1-sol 执行；发行默认仍由主控处理，安装不代表后续外部调用授权。
 
 ## 显式更新与回退
+
+### 任意目录更新
+
+你可以在任意目录检查并更新已安装技能。
+该命令与当前工作目录无关。
+它不扫描磁盘，也不会修改本地源码仓库。
+运行环境需要 Node、Git 以及访问 GitHub 的网络。
+
+```powershell
+$foremanHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+$cli = Join-Path $foremanHome 'skills/codex-foreman/scripts/cli.mjs'
+node "$cli" update --check
+node "$cli" update
+```
+
+更新器复用现有安装器逻辑。
+它只替换托管程序。
+用户配置、个人记忆与历史记录均会保留。
+默认不修改 hooks。
+更新前会先创建备份，失败时尝试自动恢复。
+缺少旧 revision 会重新安装官方 main 分支。
+相同 revision 会提示 up_to_date 且不重复安装。
+首次从旧版本升级到 0.6.5 仍需运行一次源码安装器。
+更新后需手动重启正在运行的服务。
+Codex 在新建会话后自动加载新技能。
+
+### 源码安装与回退
 
 在源码仓库内运行以下命令；每个操作沿用当前 CODEX_HOME：
 

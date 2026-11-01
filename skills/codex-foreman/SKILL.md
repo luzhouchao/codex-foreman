@@ -9,7 +9,7 @@ Codex 负责拆解、决策和验收，外部协作方通过本技能的 `script
 
 ## 运行记录位置
 
-将用户配置 `dispatch.runs_dir` 设为 `.codex/foreman/runs`，记录就保存在主对话工作区内。每次调用 CLI（包括 status、watch、resume、cancel）都追加 `--workspace "<主对话工作区绝对路径>"`，不要用子任务的执行目录替代；也可统一设置 CODEX_FOREMAN_WORKSPACE。未显式指定时以启动 CLI 的工作目录为准，`--cwd` 只决定协作方执行位置。
+将用户配置 `dispatch.runs_dir` 设为 `.codex/foreman/runs`，记录就保存在主对话工作区内。除 update 外，每次调用 CLI（包括 status、watch、resume、cancel）都追加 `--workspace "<主对话工作区绝对路径>"`，不要用子任务的执行目录替代；也可统一设置 CODEX_FOREMAN_WORKSPACE。未显式指定时以启动 CLI 的工作目录为准，`--cwd` 只决定协作方执行位置。
 
 运行目录保存任务说明、事件、报告、diff 和查看器记录。若该目录位于被审查的 Git 项目中，把对应路径加入该项目的 `.git/info/exclude`，避免日志混入代码审查或提交；保留用户现有排除项。快照追踪器本身也会排除运行记录目录。
 
@@ -94,6 +94,29 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 结果中的未知用量与费用应报告“暂无数据”，不能视为零；已经返回的部分用量在失败或取消后仍有意义，上游填充的零值无法与真实零值再区分。
 
 用户要求清理时先运行 `cleanup --workspace "<主工作区>" --group <组名>` 或 `--before YYYY-MM-DD` 查看候选，已获删除授权后再加 `--apply`。只清理工作区 `.codex/foreman/runs`；活跃任务、查看器或不明状态阻止清理，不绕过检查。此命令不删除内置对话、native-tasks、讨论汇总、更新材料或配置，也不清理所有原生聊天；它和全局界面的记录删除是两套范围。
+
+## 更新入口指令
+
+用户明确要求更新时直接执行，无需二次确认。
+用户仅要求查询更新时，不能擅自执行安装。
+命令统一使用 `node "<cli>"` 调用。
+其中 `<cli>` 为已安装技能的脚本绝对路径。
+执行环境需要 Node、Git 与 GitHub 网络访问。
+遵循当前会话的网络与写入权限。
+该流程不扫描磁盘，也不要求用户切换工作目录。
+
+执行 `node "<cli>" update --check`。
+该命令会获取临时检出并建立互斥锁。
+它不替换已安装程序，不改动配置与历史。
+若远端与本地 revision 相同，返回 up_to_date。
+
+执行 `node "<cli>" update`。
+该命令直接拉取官方 main 分支独立干净检出进行覆盖。
+安装器会先建立备份，失败时尝试自动恢复。
+只替换托管程序，保留配置、记忆与历史。
+默认不修改 hooks。
+更新完成后提示用户手动重启运行中的 Foreman 服务。
+Codex 在新会话中自动重新加载技能。
 
 ## 全局历史与界面（history / history-ui）
 

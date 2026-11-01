@@ -3,8 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { install } from '../tools/install.mjs';
 import { buildHooks, mergeHooks } from '../tools/hook-config.mjs';
+import { OFFICIAL_REPOSITORY, updateForeman } from '../skills/codex-foreman/scripts/update.mjs';
 function fixture(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-install-'));
   t.after(() => { const relative = path.relative(os.tmpdir(), home); assert.ok(relative && !relative.startsWith('..') && !path.isAbsolute(relative)); fs.rmSync(home, { recursive: true, force: true }); });
@@ -115,4 +118,78 @@ test('回退预检拒绝缺失备份与父目录junction，不移动现安装', 
   fs.symlinkSync(path.dirname(h.target), path.join(other.home, 'skills'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => install({ ...other, update: true }), /junction/);
   assert.deepEqual(snapshot(h.target), before);
+});
+
+test('独立官方checkout更新保留用户数据与hooks；旧marker检查只读，同revision不重装', (t) => {
+  const h = fixture(t); install(h);
+  const source = path.join(h.home, 'official-fixture');
+  fs.mkdirSync(path.join(source, 'tools'), { recursive: true });
+  fs.mkdirSync(path.join(source, 'skills', 'codex-foreman', 'scripts'), { recursive: true });
+  for (const name of ['install.mjs', 'hook-config.mjs']) fs.copyFileSync(new URL(`../tools/${name}`, import.meta.url), path.join(source, 'tools', name));
+  fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({ name: 'codex-foreman', version: '0.6.6', type: 'module' }));
+  fs.writeFileSync(path.join(source, 'LICENSE'), 'fixture license\n');
+  fs.writeFileSync(path.join(source, 'skills', 'codex-foreman', 'SKILL.md'), 'fixture skill\n');
+  fs.writeFileSync(path.join(source, 'skills', 'codex-foreman', 'scripts', 'new.mjs'), 'export const updated = true;\n');
+  const git = args => execFileSync('git', ['-c', 'core.autocrlf=false', '-C', source, ...args], { encoding: 'utf8', windowsHide: true });
+  git(['init']); git(['add', '.']); git(['-c', 'user.name=Foreman Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'fixture']);
+  const revision = git(['rev-parse', 'HEAD']).trim();
+  fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({ name: 'codex-foreman', version: '9.9.9', type: 'module' }));
+  // A dirty/moved source and a recorded non-official URL are never executable inputs.
+  const marker = path.join(h.target, '.foreman-install.json');
+  fs.writeFileSync(marker, JSON.stringify({ ...JSON.parse(read(marker)), revision: null, source_root: source, repository: 'https://untrusted.invalid/evil.git' }));
+  for (const name of ['config.json', 'memory.txt', 'runs.json']) fs.writeFileSync(path.join(h.target, name), `keep-${name}`);
+  fs.writeFileSync(h.hookFile, '{user hooks remain byte-for-byte}\n');
+  fs.mkdirSync(path.join(h.home, 'foreman')); fs.writeFileSync(path.join(h.home, 'foreman', 'config.json'), '{not valid JSON: must not be loaded}');
+  const before = snapshot(h.target), hooks = read(h.hookFile), calls = [], temps = [];
+  const run = (command, args, options) => {
+    calls.push({ command, args }); temps.push(options.cwd);
+    assert.notEqual(options.cwd, source); assert.equal(options.env.CODEX_HOME, h.home);
+    assert.equal(options.env.GIT_CONFIG_NOSYSTEM, '1'); assert.equal(read(options.env.GIT_CONFIG_GLOBAL), '');
+    if (command === 'git' && args.includes('clone')) {
+      assert.equal(args.at(-2), OFFICIAL_REPOSITORY); assert.ok(args.includes('--branch=main'));
+      // Substitute only the network transport in this test; checkout and installer are real.
+      return spawnSync(command, args.map(arg => arg === OFFICIAL_REPOSITORY ? source : arg).filter(arg => arg !== '--branch=main'), options);
+    }
+    if (command === process.execPath) assert.deepEqual(args.slice(1), ['--update']);
+    return spawnSync(command, args, options);
+  };
+  const checked = updateForeman({ home: h.home, check: true, run });
+  assert.equal(checked.status, 'update_available'); assert.equal(checked.current_revision, null); assert.equal(checked.latest_revision, revision);
+  assert.equal(checked.latest_version, '0.6.6');
+  assert.deepEqual(snapshot(h.target), before); assert.equal(read(h.hookFile), hooks);
+  assert.ok(!calls.some(call => call.command === process.execPath));
+  fs.writeFileSync(marker, JSON.stringify({ ...JSON.parse(read(marker)), source_root: path.join(h.home, 'moved-source') }));
+  const updated = updateForeman({ home: h.home, run });
+  assert.equal(updated.status, 'updated'); assert.ok(updated.installation.backup);
+  assert.equal(JSON.parse(read(marker)).revision, revision);
+  for (const name of ['config.json', 'memory.txt', 'runs.json']) assert.equal(read(path.join(h.target, name)), `keep-${name}`);
+  assert.equal(read(h.hookFile), hooks); assert.equal(JSON.parse(read(path.join(source, 'package.json'))).version, '9.9.9');
+  assert.match(git(['status', '--porcelain']), /M package.json/); assert.equal(JSON.parse(read(marker)).version, '0.6.6');
+  const backups = fs.readdirSync(path.join(h.home, 'foreman-install-backups'));
+  assert.equal(updateForeman({ home: h.home, run }).status, 'up_to_date');
+  assert.deepEqual(fs.readdirSync(path.join(h.home, 'foreman-install-backups')), backups);
+  assert.ok(temps.every(temp => !fs.existsSync(temp)));
+  assert.equal(fs.existsSync(path.join(h.home, '.foreman-update.lock')), false);
+});
+
+test('网络失败不动安装并清理临时目录；独立更新锁拒绝并发', (t) => {
+  const h = fixture(t); install(h); const before = snapshot(h.target); let temp;
+  assert.throws(() => updateForeman({ home: h.home, run(command, args, options) { temp = options.cwd; return { status: 1, stderr: 'network unavailable' }; } }), /获取官方更新失败.*network unavailable/);
+  assert.deepEqual(snapshot(h.target), before); assert.equal(fs.existsSync(temp), false);
+  const lock = path.join(h.home, '.foreman-update.lock'); assert.equal(fs.existsSync(lock), false);
+  fs.writeFileSync(lock, 'busy');
+  assert.throws(() => updateForeman({ home: h.home, run() { assert.fail('must not fetch while locked'); } }), /更新器已运行/);
+  assert.equal(read(lock), 'busy'); assert.deepEqual(snapshot(h.target), before);
+});
+
+test('任意目录调用update严格拒绝参数，并在检查时跳过配置、记录初始化与工作台', (t) => {
+  const h = fixture(t), cwd = path.join(h.home, 'unrelated'); fs.mkdirSync(cwd);
+  fs.mkdirSync(path.join(h.home, 'foreman')); fs.writeFileSync(path.join(h.home, 'foreman', 'config.json'), '{broken');
+  const before = snapshot(h.home), cli = fileURLToPath(new URL('../skills/codex-foreman/scripts/cli.mjs', import.meta.url));
+  for (const args of [['--hooks'], ['--check', '--check'], ['--cwd', cwd], ['extra'], ['--check=value'], ['--check']]) {
+    const result = spawnSync(process.execPath, [cli, 'update', ...args], { cwd, encoding: 'utf8', windowsHide: true, env: { ...process.env, CODEX_HOME: h.home } });
+    const checking = args.length === 1 && args[0] === '--check';
+    assert.equal(result.status, checking ? 1 : 2); assert.match(result.stderr, checking ? /尚未安装 Foreman/ : /用法：update/);
+    assert.deepEqual(snapshot(h.home), before);
+  }
 });

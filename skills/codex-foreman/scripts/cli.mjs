@@ -15,17 +15,23 @@ import { cmdCleanup } from './cleanup.mjs';
 import { cmdHistory } from './history.mjs';
 import { cmdHistoryUi } from './history-ui.mjs';
 import { autoStartHistoryUi } from './history-ui-service.mjs';
+import { updateForeman } from './update.mjs';
 import { M, die, need, resolveDir, readBrief, isGitRepo, isAscii, agentTypeOf, closestMatches } from './util.mjs';
 
-// 先加载配置，再迁移记录和重写启动器；这些步骤仍在解析参数之前完成。
+// 更新入口不加载或迁移用户配置，也不初始化工作区记录。
 const load = (cwd) => loadConfig(cwd, adapters);
 const { cmd, opts } = parseArgs(process.argv.slice(2));
-const CONFIG = load(null);
-if (!['cleanup', 'history', 'history-ui'].includes(cmd)) initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
+const CONFIG = cmd === 'update' ? null : load(null);
+if (!['cleanup', 'history', 'history-ui', 'update'].includes(cmd)) initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
   const opts = { 'add-dir': [], track: [], scope: [], file: [] };
+  if (cmd === 'update') {
+    if (rest.length > 1 || (rest.length === 1 && rest[0] !== '--check')) die('用法：update [--check]');
+    opts.check = rest[0] === '--check';
+    return { cmd, opts };
+  }
   const flags = new Set(['uncommitted', 'no-snapshot', 'verbose', 'no-intro', 'apply', 'help', 'refresh', 'legacy-global', 'no-open', 'background', 'status', 'stop']);
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
@@ -237,8 +243,12 @@ commands.cleanup = (o) => cmdCleanup(o, CONFIG.dispatch.runs_dir ? path.resolve(
 const historyRoot = (o) => o.workspace && CONFIG.dispatch.runs_dir ? path.resolve(o.workspace, CONFIG.dispatch.runs_dir) : null;
 commands.history = (o) => cmdHistory(o, historyRoot(o));
 commands['history-ui'] = (o) => cmdHistoryUi(o, historyRoot(o));
+commands.update = (o) => {
+  try { process.stdout.write(JSON.stringify(updateForeman({ check: o.check }), null, 2) + '\n'); }
+  catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
+};
 if (!commands[cmd]) die(M.usage);
-if (!opts.help && !['version', 'history-ui'].includes(cmd)) {
+if (!opts.help && !['version', 'history-ui', 'update'].includes(cmd)) {
   // Do not delay model dispatch or grant extra permissions. The opt-in helper fails independently.
   void autoStartHistoryUi().then(result => {
     if (result?.running && !result.reused) process.stderr.write(`foreman: 调用工作台已启动：${result.url}\n`);

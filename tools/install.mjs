@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { buildHooks, mergeHooks } from './hook-config.mjs';
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MARKER = '.foreman-install.json';
@@ -29,6 +30,16 @@ function replace(file, contents) {
   const tmp = `${file}.${randomUUID()}.tmp`;
   try { fs.writeFileSync(tmp, contents, { flag: 'wx' }); fs.renameSync(tmp, file); }
   finally { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); }
+}
+
+function sourceRevision() {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
+  Object.assign(env, { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' });
+  const git = args => spawnSync('git', ['-c', 'core.fsmonitor=false', '-C', ROOT, ...args], { encoding: 'utf8', windowsHide: true, env, timeout: 10000 });
+  const root = git(['rev-parse', '--show-toplevel']);
+  if (root.status !== 0 || path.resolve(root.stdout.trim()) !== path.resolve(ROOT)) return null;
+  const status = git(['status', '--porcelain']), revision = git(['rev-parse', 'HEAD']);
+  return status.status === 0 && !status.stdout.trim() && revision.status === 0 && /^[a-f0-9]{40}$/.test(revision.stdout.trim()) ? revision.stdout.trim() : null;
 }
 
 // Exported checkpoints allow deterministic failure tests without production fault flags.
@@ -116,7 +127,8 @@ function performInstall({ home, update = false, hooks = false, hooksOnly = false
           if (entry !== MARKER && !managed.includes(entry) && !oldManaged.includes(entry)) fs.cpSync(path.join(target, entry), path.join(stage, entry), { recursive: true });
         }
       }
-      write(path.join(stage, MARKER), { version: pkg.version, installedAt: new Date().toISOString(), managed });
+      write(path.join(stage, MARKER), { version: pkg.version, installedAt: new Date().toISOString(), managed,
+        repository: 'https://github.com/luzhouchao/codex-foreman.git', source_root: path.resolve(ROOT), revision: sourceRevision() });
     }
     write(path.join(backup, 'manifest.json'), manifest);
     checkpoint('staged');
