@@ -2,7 +2,7 @@
 
 让 Codex 负责规划与验收，把任务交给 pi、opencode 等本机 CLI。基于 [DaydayupV/claude-foreman](https://github.com/DaydayupV/claude-foreman) 的 MIT 执行器移植，保留执行、续接、讨论、审查、状态、实时日志及取消能力。
 
-Codex Foreman 0.5.0 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
+Codex Foreman 0.6.4 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
 
 ## 安装
 
@@ -57,7 +57,7 @@ node .\skills\codex-foreman\scripts\cli.mjs status --workspace "E:\your-workspac
 npm test
 ```
 
-上游快照：`eabe4cd5b8e981a6abcd80cf88e4d73c3a0386f8`。保留上游 LICENSE；本项目是独立移植，并非上游或 OpenAI 官方发行。
+上游快照：`eabe4cd5b8e981a6abcd80cf88e4d73c3a0386f8`，指执行器移植所依据的上游版本。历史管理页的网页资源另取自快照 `a1e52825b42e4137188ef0d7d2ecaf689147556c`（2026-10-30）。两个快照分别对应执行器移植和网页资源移植，各自单列。保留上游 LICENSE；本项目是独立移植，并非上游或 OpenAI 官方发行。
 
 ## pi web 接入
 
@@ -65,13 +65,29 @@ npm test
 
 调度器启动独立 pi 会话，不向浏览器当前聊天注入消息。pi web 更新后若路径改变，修改 `agents.pi-worker.bin`。通过 `check --agent pi-worker` 验证版本、模型清单与实际连通性。
 
-## 自动实时终端
+## 任务进度与实时日志
 
-将用户配置的 `dispatch.watch` 设为 `"auto"`，Windows 上每次执行、讨论、审查或续接会自动打开独立终端窗口（优先 PowerShell 7，未安装时回退 Windows PowerShell），显示模型、进度、工具活动和结果。同一 Codex 会话、同一个 `--group` 的并发参与方合用一个窗口。默认关闭，按需在用户配置中开启。
+0.6.2 删除了自动弹出终端运行时。
+配置项 `dispatch.watch` 保留 `off` 与 `auto`。
+两者仅用于兼容旧配置，均不再自动开窗。
 
-按 q 或关闭查看窗口不会取消任务，需停止任务时使用 `cancel --run <id> --workspace "<主对话工作区绝对路径>"`。自动打开的讨论和执行窗口（含对应续接）会等待同会话同组已登记任务全部正常完成，并经过 5 秒登记稳定期后自动关闭；任一参与方失败、超时、取消或需要输入时保留窗口显示原因，由用户关闭。审查窗口仍保留结果。手动 watch 不会关闭用户终端。已打开的旧版窗口不受更新影响。恢复手动展示只需设为 `"off"`。窗口启动失败不影响任务；错误写入日志，可用 watch 手动查看。
+任务进度以网页工作台为主要查看入口。
+随用启动不自动打开浏览器。
+历史管理页可手动刷新。
+星图看板每 2 秒自动轮询一次。
 
-此功能由执行器直接触发，不依赖钩子是否已信任。目前自动窗口支持 Windows；Codex 内置终端的自动执行入口尚未接入，其他系统使用手动 watch。
+各系统仍可选使用手动 `watch` 查看进度：
+
+```powershell
+node .\skills\codex-foreman\scripts\cli.mjs watch --run <run_id> --workspace "E:\your-workspace"
+```
+
+关闭终端查看不会取消任务。
+停止任务请使用 `cancel` 命令：
+
+```powershell
+node .\skills\codex-foreman\scripts\cli.mjs cancel --run <run_id> --workspace "E:\your-workspace"
+```
 
 ## 内置 Sol 执行与主控记录
 
@@ -126,6 +142,76 @@ node .\skills\codex-foreman\scripts\cli.mjs version --workspace "E:\your-workspa
 
 用量由实际返回值统计：未返回的 token、缓存和费用显示“暂无数据”，明确返回的 0 显示为 0。上游自身把缺失数据补成 0 时，Foreman 无法进一步区分。失败或取消不会清零已经收到的用量。
 
+## 全局历史索引与界面
+
+实际调用任务时才登记到 `CODEX_HOME/foreman/history`，未设置 `CODEX_HOME` 时为 `~/.codex/foreman/history`。索引保存来源、工作区、原 run 目录等定位信息，每条记录写成独立文件，写入原子，文件互不覆盖。列表在读取时打开原 run 的 `meta.json`，取模型、状态和 native session id 展示，聊天全文不进索引。`history`、`check` 这类查询只读不写，不产生登记。
+
+```powershell
+node .\skills\codex-foreman\scripts\cli.mjs history
+node .\skills\codex-foreman\scripts\cli.mjs history --refresh --workspace "E:\your-workspace"
+node .\skills\codex-foreman\scripts\cli.mjs history --refresh
+node .\skills\codex-foreman\scripts\cli.mjs history --legacy-global
+```
+
+`history` 默认输出 JSON 列表。在任意启动目录执行，看到的都是同一份索引，覆盖所有已登记工作区。它只读已登记目录，不扫描整块磁盘。`--refresh --workspace` 显式导入该旧工作区并刷新已知目录。`--refresh` 刷新全部已知目录。`--legacy-global` 导入旧的 `CODEX_HOME/foreman/runs`。
+
+```powershell
+node .\skills\codex-foreman\scripts\cli.mjs history --run <索引id>
+node .\skills\codex-foreman\scripts\cli.mjs history --search "<文字>" --provider "pi cli"
+```
+
+`--run <索引id>` 单独预览一条记录的任务材料和公开回答，索引 id 不是原 run_id，取列表返回值为准。预览各截前 12000 字符，按字节读取，可能更短。敏感模式和思考标签尽力遮盖，不是完整过滤，材料仍要自己核对。`--search` 和 `--provider` 是另一组列表筛选示例，只作用于列表，不参与单条预览。
+
+```powershell
+node .\skills\codex-foreman\scripts\cli.mjs history-ui
+node .\skills\codex-foreman\scripts\cli.mjs history-ui --background
+node .\skills\codex-foreman\scripts\cli.mjs history-ui --status
+node .\skills\codex-foreman\scripts\cli.mjs history-ui --stop
+node .\skills\codex-foreman\scripts\cli.mjs history-ui --workspace "E:\old-workspace" --legacy-global --no-open
+```
+
+`history-ui` 默认在 127.0.0.1:50418 启动。
+可用 `--port 0` 随机分配端口。
+服务已在运行时核验身份并复用实例。
+新建前台服务按 Ctrl+C 退出。
+加 `--background` 或复用服务会直接返回。
+`--status` 查看运行状态与可用 URL。
+`--stop` 通过认证后安全停止服务。
+`--no-open` 只输出 URL，不打开浏览器。
+启动 URL 包含访问令牌，不得共享。
+
+用户可在用户级文件配置随用启动：
+`CODEX_HOME/foreman/history-ui-settings.json`。
+未设置 `CODEX_HOME` 时默认为 `~/.codex`。
+
+```json
+{
+  "schema_version": 1,
+  "on_use": true,
+  "port": 50418
+}
+```
+
+该文件默认不存在，等效于关闭。
+配置只从用户级读取，项目配置不生效。
+开启后，实际调用任务 CLI 时并行拉起后台服务。
+排除 help、version 与 history-ui 管理命令。
+Codex 启动或 SessionStart 钩子均不拉起服务。
+首次拉起成功向 stderr 输出本机 fragment URL。
+拉起失败不影响原任务执行。
+
+Windows 下依据祖先进程确认 Desktop 宿主。
+启动时没有可验证宿主则跳过自动启动。
+运行中无法确认宿主时保守保持服务。
+多个关联宿主全部确认退出后才自然关闭。
+跨平台手动服务需显式停止。
+
+界面支持筛选、预览、勾选记录、预览删除范围和明确确认后删除。删除按精确选中项跨工作区执行，不按模糊名称批量删，默认不删除任何记录。删除只清理 Foreman 本地记录，run 内的 pi-sessions 随 run 一并清理。Antigravity、opencode、Codex 等外部原应用聊天缺少已验证的删除接口，界面明确标注原生聊天保留，本地清理不代表原应用聊天已删除。
+
+旧全局 pi 原生会话已在删除预览前提供可选开关，勾选才纳入范围。只处理授权 pi sessions 目录内的 `.jsonl`，要求首行 `type` 为 `session` 且 id 精确匹配。未匹配、越界或被其他记录共享的会话保留，符号链接和活动 pi 任务阻止删除。Foreman 之外手动续接过同一 pi ID 的活动无法核实，删除前先关闭该 pi 会话。范围以删除预览列出的为准。
+
+界面移植上游 MIT 仓库 [DaydayupV/claude-foreman](https://github.com/DaydayupV/claude-foreman) 的 31 个渲染 JS 模块、11 个头像、星图、相机、飞入看板交互和样式，取自网页快照 commit `a1e52825b42e4137188ef0d7d2ecaf689147556c`（2026-10-30），管理页带“星图看板”入口。它不是上游 Claude 桌面会话发现功能的完整移植。未采集的终端事件、用量、费用、速度和并发名额不展示，或标为未采集/—，不包含上游回放和演示数据。详细用法见 [全局历史说明](skills/codex-foreman/references/history.md)。
+
 ## 安全清理运行记录
 
 清理仅操作主工作区 `.codex/foreman/runs` 内的运行记录，默认预览。按讨论组或 UTC 日期选择（严格早于该日零点），追加 `--apply` 才删除：
@@ -137,3 +223,5 @@ node .\skills\codex-foreman\scripts\cli.mjs cleanup --workspace "E:\your-workspa
 ```
 
 存在活跃任务、查看器或无法确认安全的记录时拒绝清理。删除后相应日志和 pi 会话不可再查询或续接；命令不清理 `native-tasks`、讨论汇总、更新验收材料、用户配置或 Codex 原生对话。
+
+此命令沿用原语义，只操作 `--workspace` 指定的工作区 runs。它与上面的全局界面删除不同，不清理所有原生聊天。

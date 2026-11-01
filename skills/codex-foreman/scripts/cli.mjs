@@ -12,18 +12,21 @@ import { cmdWatch } from './watch.mjs';
 import { cmdStatus, cmdCancel, cmdAwaitBusy } from './status.mjs';
 import { cmdNativeRecord } from './native-records.mjs';
 import { cmdCleanup } from './cleanup.mjs';
+import { cmdHistory } from './history.mjs';
+import { cmdHistoryUi } from './history-ui.mjs';
+import { autoStartHistoryUi } from './history-ui-service.mjs';
 import { M, die, need, resolveDir, readBrief, isGitRepo, isAscii, agentTypeOf, closestMatches } from './util.mjs';
 
 // 先加载配置，再迁移记录和重写启动器；这些步骤仍在解析参数之前完成。
 const load = (cwd) => loadConfig(cwd, adapters);
 const { cmd, opts } = parseArgs(process.argv.slice(2));
 const CONFIG = load(null);
-if (cmd !== 'cleanup') initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
+if (!['cleanup', 'history', 'history-ui'].includes(cmd)) initializeRecords(CONFIG, resolveDir(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
 
 function parseArgs(argv) {
   const [cmd, ...rest] = argv;
   const opts = { 'add-dir': [], track: [], scope: [], file: [] };
-  const flags = new Set(['uncommitted', 'no-snapshot', 'verbose', 'no-intro', 'apply', 'help']);
+  const flags = new Set(['uncommitted', 'no-snapshot', 'verbose', 'no-intro', 'apply', 'help', 'refresh', 'legacy-global', 'no-open', 'background', 'status', 'stop']);
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (!a.startsWith('--')) die(M.badArg(a));
@@ -231,5 +234,15 @@ async function cmdModels() {
 if (['run', 'discuss', 'resume'].includes(cmd) && opts.group != null && !/^[A-Za-z0-9._-]{1,64}$/.test(opts.group)) die(M.badGroupName(opts.group));
 const commands = { run: cmdRun, discuss: cmdDiscuss, resume: cmdResume, review: cmdReview, status: (o) => cmdStatus(o, (meta) => adapters[agentTypeOf(meta)]?.stats?.(meta.session_id, meta.started_at)), watch: (o) => cmdWatch(o, load), config: cmdConfig, check: cmdCheck, models: cmdModels, cancel: cmdCancel, 'await-busy': (o) => cmdAwaitBusy(o, CONFIG), 'native-record': (o) => process.stdout.write(JSON.stringify(cmdNativeRecord(o), null, 2) + '\n'), version: () => process.stdout.write(JSON.stringify(versionInfo(), null, 2) + '\n') };
 commands.cleanup = (o) => cmdCleanup(o, CONFIG.dispatch.runs_dir ? path.resolve(o.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd(), CONFIG.dispatch.runs_dir) : null);
+const historyRoot = (o) => o.workspace && CONFIG.dispatch.runs_dir ? path.resolve(o.workspace, CONFIG.dispatch.runs_dir) : null;
+commands.history = (o) => cmdHistory(o, historyRoot(o));
+commands['history-ui'] = (o) => cmdHistoryUi(o, historyRoot(o));
 if (!commands[cmd]) die(M.usage);
+if (!opts.help && !['version', 'history-ui'].includes(cmd)) {
+  // Do not delay model dispatch or grant extra permissions. The opt-in helper fails independently.
+  void autoStartHistoryUi().then(result => {
+    if (result?.running && !result.reused) process.stderr.write(`foreman: 调用工作台已启动：${result.url}\n`);
+    else if (result?.skipped === 'unverified-owner') process.stderr.write('foreman: 未能核验 Codex 宿主，未自动启动工作台；可显式运行 history-ui --background。\n');
+  }).catch(() => process.stderr.write('foreman: 工作台未自动启动；任务继续，可用 history-ui --status 检查或显式启动。\n'));
+}
 await commands[cmd](opts);

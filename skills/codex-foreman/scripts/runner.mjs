@@ -2,8 +2,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { openAutoWatch } from './auto-watch.mjs';
-import { HOST_SESSION, checkAdmission, groupScopeOwner, isCancelled } from './records.mjs';
+import { HOST_SESSION, WORKSPACE_ROOT, RUNS_ROOT, checkAdmission, groupScopeOwner, isCancelled } from './records.mjs';
+import { registerHistoryRun } from './history.mjs';
 import { makeTracker } from './tracker.mjs';
 import { computeReviewScope } from './review-scope.mjs';
 import { M, die, notice, relativePath, pathKey, whoOf, modelOf, writeJsonAtomic, killTree, looksLikeQuestion, looksLikeInputPrompt, looksLikeFinalQuestion, needsDecision } from './util.mjs';
@@ -86,9 +86,17 @@ function startRun(ctx, { started = Date.now(), track = [], modelShown = ctx.mode
     ...(kind === 'exec' && ['tools', 'none'].includes(ctx.isolation) ? { isolation: ctx.isolation, run_access: agent.run_access } : {}),
     track, group: opts.group ?? null, scope: opts.scope, round: ctx.round ?? null,
     started_at: new Date(started).toISOString(), status: 'running', pid: process.pid, session_id: ctx.sessionId || null,
-    host_session: HOST_SESSION,
+    host_session: HOST_SESSION, source: 'codex-foreman', workspace_root: WORKSPACE_ROOT, runs_root: RUNS_ROOT,
+    viewer: { status: 'off' },
   };
-  const writeMeta = () => writeJsonAtomic(path.join(dir, 'meta.json'), meta);
+  let admitted = false, indexWarning = false;
+  const writeMeta = () => {
+    writeJsonAtomic(path.join(dir, 'meta.json'), meta);
+    if (admitted) {
+      try { registerHistoryRun({ root: RUNS_ROOT, workspace: WORKSPACE_ROOT, meta }); }
+      catch (error) { if (!indexWarning) process.stderr.write(`foreman: 统一历史索引登记失败，可通过 history --refresh --workspace 重新导入：${error.message}\n`); indexWarning = true; }
+    }
+  };
 
   let rejection;
   try {
@@ -97,15 +105,12 @@ function startRun(ctx, { started = Date.now(), track = [], modelShown = ctx.mode
     if (rejection) fs.rmSync(dir, { recursive: true });
   } finally { ctx.release(); }
   if (rejection) die(rejection);
+  admitted = true;
+  writeMeta();
   if (ctx.reviewScope) {
     const { patch, ...scope } = ctx.reviewScope;
     fs.writeFileSync(path.join(dir, 'review.patch'), patch);
     fs.writeFileSync(path.join(dir, 'review-scope.json'), JSON.stringify(scope, null, 2));
-  }
-  meta.viewer = openAutoWatch(ctx, meta);
-  writeMeta();
-  if (meta.viewer.status === 'failed' || meta.viewer.status === 'manual') {
-    process.stderr.write(`foreman: 实时窗口未打开：${meta.viewer.reason}；任务继续，可运行 watch --run ${id}\n`);
   }
   return { ctx, started, meta, writeMeta };
 }

@@ -35,7 +35,7 @@ test('UTC 日期边界且要求筛选，拒绝非法日期和路径式组名', t
   assert.throws(() => cleanupRecords({ workspace: f.workspace, group: 'topic' }, f.workspace), /不匹配/);
 });
 test('活跃/不明状态或 PID 阻止整批删除', t => {
-  for (const extra of [{ status: 'running' }, { pid: process.pid }, { pid: null }, { ended_at: null }, { id: '../escape' }]) {
+  for (const extra of [{ status: 'running' }, { pid: process.pid, ended_at: new Date().toISOString() }, { pid: null }, { ended_at: null }, { id: '../escape' }]) {
     const f = fixture(t), first = f.add(); f.add('20260102-120000-abcd', extra);
     const result = cleanupRecords({ workspace: f.workspace, group: 'topic', apply: true });
     assert.ok(result.blocked.length); assert.deepEqual(result.deleted, []); assert.ok(fs.existsSync(first)); assert.equal(fs.existsSync(path.join(f.root, '.start.lock')), false);

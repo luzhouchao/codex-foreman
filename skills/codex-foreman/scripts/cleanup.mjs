@@ -1,38 +1,10 @@
 // 仅清理主工作区内有明确结束证据的外部任务记录。
 import fs from 'node:fs';
 import path from 'node:path';
+import { ordinary, readObject as json, safeRun, safeViewers, safeAncestors, within } from './record-safety.mjs';
+import { knownRoots } from './history.mjs';
 
-const terminal = new Set(['done', 'failed', 'cancelled', 'interrupted', 'quota_exhausted', 'stalled', 'timeout', 'needs_input']);
 const runId = /^\d{8}-\d{6}-[a-z0-9]{4}$/;
-function ordinary(file, directory = false) {
-  const stat = fs.lstatSync(file);
-  if (stat.isSymbolicLink() || (directory ? !stat.isDirectory() : !stat.isFile())) throw new Error(`拒绝非普通${directory ? '目录' : '文件'}: ${file}`);
-  return stat;
-}
-function tree(dir) {
-  ordinary(dir, true);
-  for (const name of fs.readdirSync(dir)) {
-    const file = path.join(dir, name), stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink()) throw new Error(`拒绝链接: ${file}`);
-    if (stat.isDirectory()) tree(file);
-    else ordinary(file);
-  }
-}
-function json(file) { ordinary(file); return JSON.parse(fs.readFileSync(file, 'utf8')); }
-function inactive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) throw new Error('缺少有效 PID，无法确认任务安全');
-  try { process.kill(pid, 0); } catch (error) { if (error.code === 'ESRCH') return; throw new Error(`无法确认 PID ${pid} 已退出`); }
-  throw new Error(`PID ${pid} 仍在运行`);
-}
-function safeRun(dir, meta) {
-  tree(dir);
-  if (meta.id !== path.basename(dir)) throw new Error('任务 ID 与记录目录不匹配');
-  if (!terminal.has(meta.status) || !Number.isFinite(Date.parse(meta.ended_at))) throw new Error('任务未明确结束，无法安全清理');
-  inactive(meta.pid);
-  const viewer = path.join(dir, 'viewer-ready.json');
-  if (fs.existsSync(viewer)) inactive(json(viewer).pid);
-  if (meta.viewer?.status === 'requested' && !fs.existsSync(viewer)) throw new Error('查看器已请求但未确认退出');
-}
 
 export function cleanupRecords(opts, configuredRoot = null) {
   if (!opts.group && !opts.before) throw new Error('cleanup 需要 --group <组名> 或 --before YYYY-MM-DD');
@@ -42,7 +14,7 @@ export function cleanupRecords(opts, configuredRoot = null) {
     before = Date.parse(`${opts.before}T00:00:00Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.before) || !Number.isFinite(before) || new Date(before).toISOString().slice(0, 10) !== opts.before) throw new Error('before 必须是有效 YYYY-MM-DD（UTC 零点之前）');
   }
-  const workspace = fs.realpathSync(path.resolve(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
+  const workspace = safeAncestors(path.resolve(opts.workspace || process.env.CODEX_FOREMAN_WORKSPACE || process.cwd()));
   const root = path.join(workspace, '.codex', 'foreman', 'runs');
   const pathKey = value => process.platform === 'win32' ? value.toLowerCase() : value;
   if (configuredRoot && pathKey(path.resolve(configuredRoot)) !== pathKey(root)) throw new Error('仅允许清理主工作区 .codex/foreman/runs；当前 runs_dir 不匹配');
@@ -68,9 +40,15 @@ export function cleanupRecords(opts, configuredRoot = null) {
       candidates.push({ id, dir, group: meta.group ?? null, host_session: meta.host_session ?? null, parent: meta.parent ?? null, started_at: meta.started_at, status: meta.status });
       try { safeRun(dir, meta); } catch (error) { blocked.push({ id, reason: error.message }); }
     }
-    for (const name of fs.readdirSync(root).filter(name => /^\.viewer-.*\.json$/.test(name))) {
-      try { const lease = json(path.join(root, name)); if (lease.pending) throw new Error('查看器仍在启动'); inactive(lease.pid); }
-      catch (error) { blocked.push({ id: name, reason: error.message }); }
+    try { safeViewers(root, candidates.map(entry => json(path.join(entry.dir, 'meta.json'))), knownRoots().map(manifest => manifest.root)); }
+    catch (error) { blocked.push({ id: null, reason: error.message }); }
+    const chosen = new Set(candidates.map(entry => entry.id));
+    for (const id of fs.readdirSync(root).filter(name => runId.test(name) && !chosen.has(name))) {
+      try {
+        safeAncestors(path.join(root, id));
+        const meta = json(path.join(root, id, 'meta.json'));
+        for (const entry of candidates) if ([meta.native_session_file, meta.native_session_dir].some(file => typeof file === 'string' && within(entry.dir, file))) blocked.push({ id: entry.id, reason: `原生会话仍被保留任务 ${id} 引用` });
+      } catch (error) { blocked.push({ id, reason: `无法核对保留记录的共享原生会话：${error.message}` }); }
     }
     return { apply: !!opts.apply, root, before_utc: before === null ? null : new Date(before).toISOString(), candidates, blocked, deleted: [], warnings: ['讨论组筛选跨 Codex 会话，请核对 host_session。删除父记录会使保留的续接记录失去父链；不自动级联删除。'] };
   };
@@ -84,6 +62,7 @@ export function cleanupRecords(opts, configuredRoot = null) {
       for (const entry of result.candidates) {
         let ancestor = workspace;
         for (const part of ['.codex', 'foreman', 'runs']) { ancestor = path.join(ancestor, part); ordinary(ancestor, true); }
+        safeViewers(root, [json(path.join(entry.dir, 'meta.json'))], knownRoots().map(manifest => manifest.root));
         safeRun(entry.dir, json(path.join(entry.dir, 'meta.json')));
         fs.rmSync(entry.dir, { recursive: true });
         result.deleted.push(entry.id);

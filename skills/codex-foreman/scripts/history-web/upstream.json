@@ -1,0 +1,193 @@
+{
+  "repository": "https://github.com/DaydayupV/claude-foreman",
+  "commit": "a1e52825b42e4137188ef0d7d2ecaf689147556c",
+  "commit_date": "2026-10-30",
+  "license": "MIT",
+  "license_file": "upstream/LICENSE",
+  "original_board_path": "board/web",
+  "integration": "adapter.js",
+  "build": "node build.mjs",
+  "excluded_demo": "02-uni-demo.js",
+  "files": [
+    {
+      "file": "upstream/web/00-text.js",
+      "sha256": "28ee8d0eef2f02061b85e8f41866dedd293a4d67f070782d2ef6e7a07ccd45b8"
+    },
+    {
+      "file": "upstream/web/01-state.js",
+      "sha256": "2e8149f6806bebe4098b943af25b65e9ac0f04b266298bce3f1765c79558422f"
+    },
+    {
+      "file": "upstream/web/01-universe.js",
+      "sha256": "5cc2e7510af014b118d05fd0f0a69bd2bda767b8caa03e12aa2acf948056794f"
+    },
+    {
+      "file": "upstream/web/02-avatars.js",
+      "sha256": "99e7c030e757c97a142ae310d9884f4925b94438bb4419a1d6c765fea39d80c3"
+    },
+    {
+      "file": "upstream/web/03-timeline.js",
+      "sha256": "f0b765e31e921dfd4ee0b4ba4268af66ac254d8599f5aa6747913f824903a2ca"
+    },
+    {
+      "file": "upstream/web/04-life.js",
+      "sha256": "9d5d428438768b4fa56a7174f0e2c79225dd00b734a8925d9cd9be77098cbe3e"
+    },
+    {
+      "file": "upstream/web/04-rates.js",
+      "sha256": "5fa7f71cd0a6fc98207b518fb74fdc0579a9a983b5b72eaf3fda4f366abc6c57"
+    },
+    {
+      "file": "upstream/web/05-world.js",
+      "sha256": "311bd1b91b36cba812203500df56df25422bf943abe0540075d55fad097fcd07"
+    },
+    {
+      "file": "upstream/web/06-cards.js",
+      "sha256": "8497c5234993ae6c2ab340b82c22ec13e4f856ce975db21c577b753b357fda96"
+    },
+    {
+      "file": "upstream/web/06-states.js",
+      "sha256": "4c34f4aed8fc84d915fc787cac066ebb5402b3fb4b8c1cc367bc867ffb2efa2e"
+    },
+    {
+      "file": "upstream/web/07-table.js",
+      "sha256": "141305da29155b28b936c3bc3d3ba9c76a1df1f8a090744d09b5de90c110d6a0"
+    },
+    {
+      "file": "upstream/web/07-terms.js",
+      "sha256": "d2abce3c9c08b86c7d36c46ab0f11fe05fb7fb1f0c6b346e2e5e897f3072d1f3"
+    },
+    {
+      "file": "upstream/web/07-uni-side.js",
+      "sha256": "f870ee4a697f56b1a7db025002bc96179ab3ea87da0ec640c7592423ee6d06fc"
+    },
+    {
+      "file": "upstream/web/07-uni-table.js",
+      "sha256": "3d958ec0476814400d3b793fae2475023e78fc028de024db56b1a852c973afe0"
+    },
+    {
+      "file": "upstream/web/08-beams.js",
+      "sha256": "f5ec29c5b6b738314cf705d64f5e6740edd324c08584e613a88d66a712bca940"
+    },
+    {
+      "file": "upstream/web/08-cosmos.js",
+      "sha256": "77c4db254bddfe6c04d202036164543a426d9e4a8a6c6a96ae973fa21a95d255"
+    },
+    {
+      "file": "upstream/web/08-fx.js",
+      "sha256": "9d2218533d0a87c9d4b08196eaed11818392f0be34b7dd95258177e8b51a84f7"
+    },
+    {
+      "file": "upstream/web/08-labels.js",
+      "sha256": "7ec03b5188dd996e5754f67539f7c26dc8f6d8b2c9a7288e910371da2994e442"
+    },
+    {
+      "file": "upstream/web/08-life.js",
+      "sha256": "0823af04ad5677f6805c375be48439ab415cd45abeb7ff755dffc11e33161cde"
+    },
+    {
+      "file": "upstream/web/08-outbeam.js",
+      "sha256": "1c900b61acff153f6b4c3d416e3fc741989927cb6b2f077fce0ca0fdff0c07f6"
+    },
+    {
+      "file": "upstream/web/08-outlife.js",
+      "sha256": "60cbd3458fc58b91c9240d31abcbbf13d2f9ae869f3c1c888267e0172250bf1a"
+    },
+    {
+      "file": "upstream/web/08-smooth.js",
+      "sha256": "5128f1eaf7b4a4c5571212575e0b82216fb8098ca51a78b700fea90eff6f909a"
+    },
+    {
+      "file": "upstream/web/08-states.js",
+      "sha256": "14ec6484e72d4db17ebdaa899a660cbd53cd58c856acf842c8a4c4446034870d"
+    },
+    {
+      "file": "upstream/web/08-surge.js",
+      "sha256": "dc21dc8b9f98c4cf84e4b30a9562fbae33b0250efae216f441d112de310fac00"
+    },
+    {
+      "file": "upstream/web/08-tags.js",
+      "sha256": "048dcc0adf9346b4442155e7f82255850ab765168385b5b530950af06b4dce82"
+    },
+    {
+      "file": "upstream/web/08-uni-draw.js",
+      "sha256": "c13c406b1a858a20a5cc4886da5d05ab04271289067433e481245e3d9763522d"
+    },
+    {
+      "file": "upstream/web/08-uni-fly.js",
+      "sha256": "502c56a41f41d3f33326f2f9ef5f1682d2fe2c16daeec2cb2c84fded4c9a3dc7"
+    },
+    {
+      "file": "upstream/web/08-uni-galaxy.js",
+      "sha256": "69ea9ec5c09eaff027b69bda361f0ccdc4edd95442877851d4428d39739b2112"
+    },
+    {
+      "file": "upstream/web/08-uni-glow.js",
+      "sha256": "217ddea8a38cbd34d30909d05e695afe34f41a8c6d83262b85939143ce6332aa"
+    },
+    {
+      "file": "upstream/web/08-uni-layout.js",
+      "sha256": "224908e9f07ee29b5804a5266c683c87fa2b38c34bae75e7fe6b788472142726"
+    },
+    {
+      "file": "upstream/web/09-main.js",
+      "sha256": "f1af0990b96951bfdbf61539eaa3301094a076b091bde47e6cc2262ccee4c153"
+    },
+    {
+      "file": "upstream/web/board.css",
+      "sha256": "4798a493b15591f8e98ba515f6d9b5dc271fa956ac3bf8b378d62b4c1f42779f"
+    },
+    {
+      "file": "upstream/web/shell.html",
+      "sha256": "220619623aaa5225b96a62742f780297d52dc1f0c163b3c06fe8f3213622e5f4"
+    },
+    {
+      "file": "upstream/display.mjs",
+      "sha256": "0f0af0719753ed1ee8a067911a9f156a5f879519c09427c5649d07530b1dcadb"
+    },
+    {
+      "file": "upstream/avatars/chatgpt.png",
+      "sha256": "a830b01e259eaaf2d87568f3151ba5c6768772338cdb070ad683867356fde29b"
+    },
+    {
+      "file": "upstream/avatars/claude.png",
+      "sha256": "9ef2cd16f91ef82ce194b737903a001500b7f30abe971bc266ea39cd73a11a7a"
+    },
+    {
+      "file": "upstream/avatars/deepseek.png",
+      "sha256": "0fed812caa8251ae38d53aa366ef402fcf74a6b46b8090229d378ac2e7522c59"
+    },
+    {
+      "file": "upstream/avatars/gemini.png",
+      "sha256": "aa8fd8cf1777bba85124266216d4f594462ba301e550da01410b5b3ddd518d48"
+    },
+    {
+      "file": "upstream/avatars/glm.png",
+      "sha256": "b9a6a22d709a0125ff49b5eb00964e49f1d57c563a2801e66ff032eff9d08896"
+    },
+    {
+      "file": "upstream/avatars/grok.png",
+      "sha256": "1df569427a24defc7eb63eb6ee3874c0ea9952be133466e0e6118f2b06eb3ac5"
+    },
+    {
+      "file": "upstream/avatars/kimi.png",
+      "sha256": "15cdcf71f70e4cc2454b6b68cd246460b35b7abce450c7296d61bd7a62ae33f1"
+    },
+    {
+      "file": "upstream/avatars/mimo.png",
+      "sha256": "634137d4903494d04851c78d1674945d8f2da0ae5d83966c324082ac83c08a56"
+    },
+    {
+      "file": "upstream/avatars/minimax.png",
+      "sha256": "1019168297a5e812d0d7c2fa06f72facbc9af2de7d94ea3f2931f573b0b25fed"
+    },
+    {
+      "file": "upstream/avatars/qwen.png",
+      "sha256": "601ed62650fa4ac73af29e120ed1e315cf4256631b5cd6feadade75582ce29ba"
+    },
+    {
+      "file": "upstream/avatars/unknown.png",
+      "sha256": "0035d73c5714b95927fde03401da36dd800919ab519cc6604ef3bc35fdf7710f"
+    }
+  ]
+}

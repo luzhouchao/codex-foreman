@@ -1,0 +1,188 @@
+{
+  "design": {
+    "model": "gemini-3.8-flash-medium",
+    "native_model": "M319",
+    "verification": "confirmed",
+    "run_id": "20261101-114824-8jd1"
+  },
+  "reui_commit": "067aa0dc7f8bbfec1cd76fc5ad31f842be5f569a",
+  "spectrum_commit": "acdc998c64829f8ae037be48e3c273ccc8d71f60",
+  "files": [
+    {
+      "name": "dialog",
+      "source": "https://github.com/keenthemes/reui/blob/067aa0dc7f8bbfec1cd76fc5ad31f842be5f569a/registry/bases/radix/ui/dialog.tsx",
+      "original": "vendor/reui/dialog.tsx",
+      "sha256": "71fb4e64866fa41cd770866c433342b3c469a1576d6cc7afe0b3b6cb3b06ae04",
+      "adapted": "src/components/reui/dialog.tsx",
+      "license": [
+        "MIT: ReUI",
+        "MIT: shadcn/ui"
+      ],
+      "changes": [
+        "local cn/Button/X imports",
+        "Foreman CSS styling"
+      ]
+    },
+    {
+      "name": "sheet",
+      "source": "https://github.com/keenthemes/reui/blob/067aa0dc7f8bbfec1cd76fc5ad31f842be5f569a/registry/bases/radix/ui/sheet.tsx",
+      "original": "vendor/reui/sheet.tsx",
+      "sha256": "0b90787b36db17aa84acc5c30d9df896eae06581955ed4f1d7ab28986e659aed",
+      "adapted": "src/components/reui/sheet.tsx",
+      "license": [
+        "MIT: ReUI",
+        "MIT: shadcn/ui"
+      ],
+      "changes": [
+        "local cn/Button/X imports",
+        "Foreman CSS styling"
+      ]
+    },
+    {
+      "name": "resizable",
+      "source": "https://github.com/keenthemes/reui/blob/067aa0dc7f8bbfec1cd76fc5ad31f842be5f569a/registry/bases/radix/ui/resizable.tsx",
+      "original": "vendor/reui/resizable.tsx",
+      "sha256": "7971b48619d5e322ca95e29b2a2ff72eacb95b730d1fcbdead94511dae056e83",
+      "adapted": "src/components/reui/resizable.tsx",
+      "license": [
+        "MIT: ReUI",
+        "MIT: shadcn/ui"
+      ],
+      "changes": [
+        "local cn/Button/X imports",
+        "Foreman CSS styling"
+      ]
+    },
+    {
+      "name": "skeleton",
+      "source": "https://github.com/keenthemes/reui/blob/067aa0dc7f8bbfec1cd76fc5ad31f842be5f569a/registry/bases/radix/ui/skeleton.tsx",
+      "original": "vendor/reui/skeleton.tsx",
+      "sha256": "8fcbad84e494a75484a0975221fb40f54c4a7d68f79cfc305cb158d1feb1badf",
+      "adapted": "src/components/reui/skeleton.tsx",
+      "license": [
+        "MIT: ReUI",
+        "MIT: shadcn/ui"
+      ],
+      "changes": [
+        "local cn/Button/X imports",
+        "Foreman CSS styling"
+      ]
+    },
+    {
+      "name": "copy-button",
+      "source": "https://github.com/keenthemes/reui/blob/067aa0dc7f8bbfec1cd76fc5ad31f842be5f569a/components/copy-button.tsx",
+      "original": "vendor/reui/copy-button.tsx",
+      "sha256": "3622a63fe13c03515ffa53ef26ff4e89ef135de143d8ddbcb242e3f04e419420",
+      "adapted": "src/components/reui/copy-button.tsx",
+      "license": [
+        "MIT: ReUI",
+        "MIT: shadcn/ui"
+      ],
+      "changes": [
+        "remove analytics/tooltip",
+        "native accessible button",
+        "await clipboard and report failures"
+      ]
+    },
+    {
+      "name": "components/motion/expandable-action-bar.tsx",
+      "source": "https://github.com/arihantcodes/spectrum-ui/blob/acdc998c64829f8ae037be48e3c273ccc8d71f60/components/motion/expandable-action-bar.tsx",
+      "registry": "https://ui.spectrumhq.in/r/expandable-action-bar.json",
+      "original": "vendor/spectrum/components/motion/expandable-action-bar.tsx",
+      "sha256": "84cbc51d9cad8aa4e2a3cf5e5ed6cba18f28b390aa8038feca7d41eee32ff6ef",
+      "adapted": "src/components/motion/expandable-action-bar.tsx",
+      "license": [
+        "Apache-2.0: Spectrum UI",
+        "MIT: beUI (upstream attribution)"
+      ],
+      "changes": [
+        "local attribution header",
+        "keyboard click retains focus"
+      ]
+    },
+    {
+      "name": "lib/hooks/use-dismiss.ts",
+      "source": "https://github.com/arihantcodes/spectrum-ui/blob/acdc998c64829f8ae037be48e3c273ccc8d71f60/lib/hooks/use-dismiss.ts",
+      "registry": "https://ui.spectrumhq.in/r/expandable-action-bar.json",
+      "original": "vendor/spectrum/lib/hooks/use-dismiss.ts",
+      "sha256": "af14b2fed0bf0e79a7ad3d3890ca6b5d0d1ffce9f7e289dc5840a34c16fabedd",
+      "adapted": "src/lib/hooks/use-dismiss.ts",
+      "license": [
+        "Apache-2.0: Spectrum UI",
+        "MIT: beUI (upstream attribution)"
+      ],
+      "changes": [
+        "local attribution header",
+        "keyboard click retains focus"
+      ]
+    },
+    {
+      "name": "lib/hooks/use-hover-gesture.ts",
+      "source": "https://github.com/arihantcodes/spectrum-ui/blob/acdc998c64829f8ae037be48e3c273ccc8d71f60/lib/hooks/use-hover-gesture.ts",
+      "registry": "https://ui.spectrumhq.in/r/expandable-action-bar.json",
+      "original": "vendor/spectrum/lib/hooks/use-hover-gesture.ts",
+      "sha256": "d381531c81668faf22cada58671451f4e7b53cf8d8718d6768e485139810755d",
+      "adapted": "src/lib/hooks/use-hover-gesture.ts",
+      "license": [
+        "Apache-2.0: Spectrum UI",
+        "MIT: beUI (upstream attribution)"
+      ],
+      "changes": [
+        "local attribution header",
+        "keyboard click retains focus"
+      ]
+    },
+    {
+      "name": "lib/hooks/use-tap-gesture.ts",
+      "source": "https://github.com/arihantcodes/spectrum-ui/blob/acdc998c64829f8ae037be48e3c273ccc8d71f60/lib/hooks/use-tap-gesture.ts",
+      "registry": "https://ui.spectrumhq.in/r/expandable-action-bar.json",
+      "original": "vendor/spectrum/lib/hooks/use-tap-gesture.ts",
+      "sha256": "b91954bf9f1cdc1771b2a6eac815d2f4e2493cb2cde5f508b2d96509dd71aeee",
+      "adapted": "src/lib/hooks/use-tap-gesture.ts",
+      "license": [
+        "Apache-2.0: Spectrum UI",
+        "MIT: beUI (upstream attribution)"
+      ],
+      "changes": [
+        "local attribution header",
+        "keyboard click retains focus"
+      ]
+    },
+    {
+      "name": "lib/touch.ts",
+      "source": "https://github.com/arihantcodes/spectrum-ui/blob/acdc998c64829f8ae037be48e3c273ccc8d71f60/lib/touch.ts",
+      "registry": "https://ui.spectrumhq.in/r/expandable-action-bar.json",
+      "original": "vendor/spectrum/lib/touch.ts",
+      "sha256": "f2a15c243c86c8bd1abb6e2e65a423b3a4c45cc1d797ebd83997f21cd1beadb9",
+      "adapted": "src/lib/touch.ts",
+      "license": [
+        "Apache-2.0: Spectrum UI",
+        "MIT: beUI (upstream attribution)"
+      ],
+      "changes": [
+        "local attribution header",
+        "keyboard click retains focus"
+      ]
+    }
+  ],
+  "not_used": [
+    {
+      "source": "bencho.dev",
+      "reason": "public preview accessible; source and applicable license were not retrieved; replaced with ReUI Resizable/CopyButton"
+    },
+    {
+      "source": "Spectrum Skeleton",
+      "reason": "registry returned a demo using shadcn Skeleton; actual reusable Skeleton copied from ReUI instead"
+    }
+  ],
+  "other_preferred_sources": [
+    "21st.dev",
+    "reactdrops.dev",
+    "transitions.dev",
+    "feralui.dev",
+    "kinetics.colorion.co",
+    "8bitcn.com",
+    "evilcharts.com"
+  ],
+  "other_sources_status": "not shipped; design uses no unsupported charts or ornamental libraries"
+}

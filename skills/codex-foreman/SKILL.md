@@ -37,9 +37,19 @@ node "<cli>" cancel --run <run_id> --workspace "<主对话工作区绝对路径>
 
 ## 结果与验收
 
-保存 run_id，通过 status 查看状态。`dispatch.watch: "auto"` 时，Windows 执行器会在任务登记后自动打开实时终端；同一 Codex 会话的同组任务共用窗口，主控无需另外开窗。将参与同一场讨论的调用传入相同的 `--group`。窗口关闭或按 q 只结束查看，任务继续；自动讨论和执行窗口（含对应续接）在同会话同组已登记任务全部正常完成、经过 5 秒登记稳定期后自动关闭；失败、超时、取消或需要输入时保留窗口显示原因。审查窗口保留结果。手动 watch 不关闭用户终端，已打开的旧版窗口不受更新影响。设为 `"off"` 可关闭自动展示。其他系统目前手动运行 watch。
+保存 run_id，通过 status 查看状态。
+0.6.2 删除了自动弹出终端运行时。
+配置项 `dispatch.watch` 保留 `off` 与 `auto`。
+两者仅用于兼容旧配置，均不再自动开窗。
 
-此实现使用独立 Windows PowerShell 窗口，尚未连接 Codex 内置终端。`meta.json` 中的 viewer 记录启动请求或错误，`viewer-ready.json` 表示查看器已真正启动。开窗失败时继续任务，并提供手动 watch 命令。可重新运行 watch 查看记录。
+任务进度以网页工作台为主要查看入口。
+随用启动不自动打开浏览器。
+历史管理页可手动刷新。
+星图看板每 2 秒自动轮询一次。
+主控与用户仍可选使用手动 `watch` 查看进度。
+
+关闭终端查看不会取消任务。
+停止任务请使用 `cancel --run <run_id> --workspace "<主对话工作区绝对路径>"`。
 
 完成后读取 `report`、`last_message`、`changes`、`warnings` 和 `run_dir/diff.patch`，逐项检查实际 diff，并亲自运行必要验证。edit 模式的测试由主控执行，不能只采信协作方的通过声明。审查使用新会话，逐条核实发现；讨论意见不按多数票决定。
 
@@ -83,7 +93,47 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 
 结果中的未知用量与费用应报告“暂无数据”，不能视为零；已经返回的部分用量在失败或取消后仍有意义，上游填充的零值无法与真实零值再区分。
 
-用户要求清理时先运行 `cleanup --workspace "<主工作区>" --group <组名>` 或 `--before YYYY-MM-DD` 查看候选，已获删除授权后再加 `--apply`。只清理工作区 `.codex/foreman/runs`；活跃任务、查看器或不明状态阻止清理，不绕过检查。此命令不删除内置对话、native-tasks、讨论汇总、更新材料或配置。
+用户要求清理时先运行 `cleanup --workspace "<主工作区>" --group <组名>` 或 `--before YYYY-MM-DD` 查看候选，已获删除授权后再加 `--apply`。只清理工作区 `.codex/foreman/runs`；活跃任务、查看器或不明状态阻止清理，不绕过检查。此命令不删除内置对话、native-tasks、讨论汇总、更新材料或配置，也不清理所有原生聊天；它和全局界面的记录删除是两套范围。
+
+## 全局历史与界面（history / history-ui）
+
+索引在 `CODEX_HOME/foreman/history`（未设置时 `~/.codex/foreman/history`）。实际调用任务时才登记，各记录独立原子文件，保存来源、工作区、原 run 目录等定位信息。列表读取时打开原 run 的 `meta.json`，展示模型、状态和 native session id，聊天全文不进索引。`history`、`check` 只读不写，不产生登记。主控无需为登记做额外操作。
+
+```text
+node "<cli>" history
+node "<cli>" history --refresh --workspace "<旧工作区绝对路径>"
+node "<cli>" history --refresh
+node "<cli>" history --legacy-global
+node "<cli>" history --run <索引id>
+node "<cli>" history --search "<文字>" --provider "pi cli"
+node "<cli>" history-ui [--background] [--status] [--stop] [--port <端口>] [--workspace "<旧工作区>"] [--legacy-global] [--no-open]
+```
+
+约定：`history` 默认输出 JSON 列表，在任意启动目录都能看到所有已登记工作区，不逐个切文件夹，也不扫描磁盘。导入旧工作区只用 CLI，`--refresh --workspace` 导入指定旧工作区并刷新已知目录，`--refresh` 刷新全部已知目录，`--legacy-global` 导入旧 `CODEX_HOME/foreman/runs`。`--run <索引id>` 单独预览一条记录，索引 id 不是原 run_id，从列表返回值取。预览各截前 12000 字符，按字节读取可能更短。敏感模式和思考标签尽力遮盖，不是完整过滤，材料仍需核对。`--search` 和 `--provider` 是另一组列表筛选示例，只筛列表，不参与单条预览。`history-ui` 默认在 127.0.0.1:50418 启动。
+可用 `--port 0` 随机分配端口。
+服务已在运行时核验身份并复用实例。
+新建前台服务按 Ctrl+C 退出。
+加 `--background` 或复用服务会直接返回。
+`--status` 查询运行状态。
+`--stop` 校验身份后停止服务。
+`--no-open` 只输出 URL，不打开浏览器。
+启动 URL 包含访问令牌，不得共享。
+
+可在用户配置中设置随用启动。
+文件为 `CODEX_HOME/foreman/history-ui-settings.json`。
+未设 `CODEX_HOME` 时默认为 `~/.codex`。
+内容设为 `{"schema_version":1,"on_use":true,"port":50418}`。
+实际调用任务 CLI 时并行拉起隐藏服务。
+排除 help、version 与 history-ui 管理命令。
+Codex 启动或 SessionStart 钩子均不拉起。
+首次拉起向 stderr 输出 URL。
+启动时无有效宿主则跳过拉起。
+运行中宿主未知则保守保持服务。
+Windows 下多个关联宿主全退出才自然关闭。
+
+删除边界：界面默认不删除任何记录，需筛选、预览、勾选、预览删除范围并明确确认，按精确选中项跨工作区删除，不按模糊名称批量删。活跃任务、查看器、登记锁、异常路径、符号链接、不明状态都会阻止删除，删除前重新验证，范围变了就重新预览。只清理 Foreman 本地记录，保护认证、用户配置、个人聊天、native-tasks 和源码等非选中内容。run 内 pi-sessions 随 run 一并清理。旧全局 pi 原生会话已在删除预览前提供可选开关，勾选才纳入。只处理授权 pi sessions 目录内的 `.jsonl`，首行 `type` 为 `session` 且 id 精确匹配。未匹配、越界或被共享的会话保留，符号链接和活动 pi 任务阻止删除。Foreman 之外手动续接过同一 pi ID 的活动无法核实，主控应让用户先关闭该 pi 会话再删除，不声称所有进程均已核查。范围以删除预览列出的为准。Antigravity、opencode、Codex 等外部原应用聊天缺少已验证删除接口，界面明确保留原生聊天，不把本地清理当作原应用聊天删除成功。
+
+界面移植上游 MIT 仓库 DaydayupV/claude-foreman 的 31 个渲染 JS 模块、11 个头像、星图、相机、飞入看板交互和样式，取自网页快照 commit `a1e52825b42e4137188ef0d7d2ecaf689147556c`（2026-10-30），管理页带“星图看板”入口。它不是上游 Claude 桌面会话发现功能的完整移植。未采集的终端事件、用量、费用、速度和并发名额不展示，或标为未采集/—，不含上游回放和演示数据。详细说明读 [全局历史说明](references/history.md)。
 
 ## Antigravity 桌面协作
 

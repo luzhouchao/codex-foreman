@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.2 — 2026-11-01
+
+- 移除自动开窗运行时。删除 auto-watch.mjs、watch-window.mjs 与 viewer-outcome.mjs。`dispatch.watch` 保留 `off` 与 `auto` 仅兼容旧配置，均不再自动开窗。任务进度以网页工作台为主要入口，可选保留手动 `watch`。
+- 调整查看器删除保护范围。仅所选记录关联的活跃查看器阻止删除，无关组或工作区的查看器不再全局阻碍删除。
+- 完善 `history-ui` 命令行管理。默认端口改为 50418，支持 `--port 0` 随机端口。新增 `--background`、`--status` 与 `--stop` 选项。复用服务时校验 Bearer、实例 ID、PID 与启动时间，未知占用不接管。
+- 支持随用启动后台服务。新增用户级配置 `CODEX_HOME/foreman/history-ui-settings.json`（未设时默认 `~/.codex`）。配置 `on_use: true` 后调用任务 CLI 时并行拉起隐藏服务，排除 help/version/history-ui 管理命令，不打开浏览器或终端。Codex 启动或 SessionStart 不拉起。首次启动向 stderr 输出 fragment URL，失败不影响原任务。
+- 规范服务生命周期联动。Windows 启动时无有效宿主则跳过自动拉起，运行中宿主未知则保守保持服务，多个关联宿主全部退出后自然关闭。跨平台手动服务需显式停止。
+- 明确数据与界面边界。状态与锁存放在 `CODEX_HOME/foreman/history-ui-service`，启动 URL 使用 fragment 传令牌，私有状态文件也保存令牌。自动启动不导入随意目录，保留手动导入。保留 React+TS+Tailwind 静态产物及星图看板，无需 npm 构建。
+
+## 0.6.0 — 2026-11-01
+
+- 新增全局历史索引，位置 `CODEX_HOME/foreman/history`（未设置时 `~/.codex/foreman/history`）。每条记录独立原子文件，保存来源、工作区、原 run 目录等定位信息，只在实际调用时登记，`history`、`check` 等查询不产生记录。列表读取时打开原 run 的 `meta.json` 展示模型、状态和 native session id，聊天全文不进索引。
+- 新增 `history` 命令。默认输出 JSON 列表，任意启动目录读同一份索引，覆盖所有已登记工作区，不扫描磁盘。`--refresh --workspace` 显式导入旧工作区并刷新已知目录，`--refresh` 刷新全部已知目录，`--legacy-global` 导入旧 `CODEX_HOME/foreman/runs`。`--run <索引id>` 单独预览一条记录的任务材料与公开回答，各截前 12000 字符且按字节读取可能更短，敏感模式和思考标签尽力遮盖。`--search` 和 `--provider` 是另一组列表筛选示例，不参与单条预览。索引 id 不等于原 run_id。
+- 新增 `history-ui`，在随机的 127.0.0.1 端口打开本机界面，默认汇总全部已登记工作区。`--no-open` 只打印启动 URL，Ctrl+C 停止服务。启动 URL 含令牌，保持完整不共享。界面只能刷新已知目录，注册新旧工作区仍用 CLI。
+- 界面支持筛选、预览、勾选记录、预览删除范围和明确确认后删除，按精确选中项跨工作区删除，不按模糊名称批量删，默认不删除任何记录。活跃任务、查看器、登记锁、异常路径、符号链接和不明状态阻止删除，删除前重新验证。
+- 只清理 Foreman 本地记录，run 内 pi-sessions 随 run 清理。旧全局 pi 原生会话已在删除预览前提供可选开关，只处理授权 pi sessions 目录内首行 `type` 为 `session` 且 id 精确匹配的 `.jsonl`；未匹配、越界、共享的会话以及符号链接、活动 pi 任务都会阻止删除，范围以删除预览列出的为准，删除前先关闭对应 pi 会话。Antigravity、opencode、Codex 等外部原应用聊天缺少已验证删除接口，明确保留，本地清理不代表原应用聊天已删除。
+- 管理页带“星图看板”入口，已移植上游 [DaydayupV/claude-foreman](https://github.com/DaydayupV/claude-foreman) 的 31 个渲染 JS 模块、11 个头像、星图、相机、飞入看板交互和样式，网页快照 commit `a1e52825b42e4137188ef0d7d2ecaf689147556c`（2026-10-30）。不是上游 Claude 桌面会话发现的完整移植，未采集的终端事件、用量、费用、速度和并发名额不展示或标为未采集/—，不含上游回放和演示数据。
+- 原 `cleanup --group/--before [--apply]` 保持兼容，仍只操作指定 workspace runs，与全局界面删除范围不同。
+
 ## 0.5.0 — 2026-10-23
 
 - 新增实验性 Antigravity 桌面适配，支持 discuss、review、讨论续接与取消确认。

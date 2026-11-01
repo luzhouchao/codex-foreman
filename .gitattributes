@@ -1,0 +1,4 @@
+/history-front/** text eol=lf
+/skills/codex-foreman/scripts/history-ui/** text eol=lf
+/skills/codex-foreman/scripts/history-web/** text eol=lf
+/skills/codex-foreman/scripts/history-web/upstream/avatars/*.png binary

@@ -195,7 +195,7 @@ ${schema}`,
   fixLauncherNotAscii: '记录目录的路径里有非英文字符，桌面版的终端面板打不开实时查看（它只接受 ASCII 命令）。在 ~/.codex/foreman/config.json 里把 dispatch.runs_dir 设成只含英文字母和数字的路径，比如 "D:/foreman-runs"。命令行版不受影响',
 
   // ---------- 参数 ----------
-  usage: '用法：cli.mjs <run|discuss|resume|review|status|watch|config|check|await-busy|cancel> [选项]，run / discuss / review / check 支持 [--agent <协作方>]，discuss / resume 支持 [--file <路径[:起始行-结束行]>]...，run / resume / discuss / review 支持 [--track <路径>]...，run / resume / discuss 支持 [--group <组名>] [--scope <路径>]...，status / watch 支持 [--group <组名>]，详见文件头部注释',
+  usage: '用法：cli.mjs <run|discuss|resume|review|status|watch|history|history-ui|cleanup|native-record|config|check|models|version|await-busy|cancel> [选项]，history / history-ui / cleanup 支持 --help；run / discuss / review / check 支持 [--agent <协作方>]，discuss / resume 支持 [--file <路径[:起始行-结束行]>]...，run / resume / discuss / review 支持 [--track <路径>]...，run / resume / discuss 支持 [--group <组名>] [--scope <路径>]...，status / watch 支持 [--group <组名>]',
   badDiscussMaxRounds: 'dispatch.discuss_max_rounds 必须是不小于 1 的整数（在 ~/.codex/foreman/config.json 里设置）',
   discussRoundsExceeded: (root, done, max) => `讨论 ${root} 已经启动 ${done} 轮（含失败或中止），达到上限 ${max}（配置项 dispatch.discuss_max_rounds）。请根据已有结果裁决；确实需要再讨论，调大 ~/.codex/foreman/config.json 里的 dispatch.discuss_max_rounds`,
   statusRound: (n) => `［第 ${n} 轮］`,
@@ -582,7 +582,7 @@ ${schema}`,
   fixLauncherNotAscii: "The run directory path has non-English characters, so the desktop app's terminal panel can't open the live view (it only accepts ASCII commands). In ~/.codex/foreman/config.json, set dispatch.runs_dir to a path with only English letters and digits, such as \"D:/foreman-runs\". The CLI isn't affected",
 
   // ---------- arguments ----------
-  usage: 'Usage: cli.mjs <run|discuss|resume|review|status|watch|config|check|await-busy|cancel> [options]; run / discuss / review / check support [--agent <agent>]; discuss / resume support [--file <path[:start-end]>]...; run / resume / discuss / review support [--track <path>]...; run / resume / discuss support [--group <name>] [--scope <path>]...; status / watch support [--group <name>]; see the comment at the top of the file',
+  usage: 'Usage: cli.mjs <run|discuss|resume|review|status|watch|history|history-ui|cleanup|native-record|config|check|models|version|await-busy|cancel> [options]; history / history-ui / cleanup support --help; run / discuss / review / check support [--agent <agent>]; discuss / resume support [--file <path[:start-end]>]...; run / resume / discuss / review support [--track <path>]...; run / resume / discuss support [--group <name>] [--scope <path>]...; status / watch support [--group <name>]',
   badDiscussMaxRounds: 'dispatch.discuss_max_rounds must be a whole number of at least 1 (set it in ~/.codex/foreman/config.json)',
   discussRoundsExceeded: (root, done, max) => `Discussion ${root} has already started ${done} rounds (including failed or interrupted attempts), the limit of ${max} (the dispatch.discuss_max_rounds setting). Rule on the results you have; if another round is really needed, raise dispatch.discuss_max_rounds in ~/.codex/foreman/config.json`,
   statusRound: (n) => `[round ${n}] `,

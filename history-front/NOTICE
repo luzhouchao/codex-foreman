@@ -1,0 +1,24 @@
+Foreman History UI
+
+Visual design and interaction specification: Gemini 3.8 Flash (Antigravity native M319),
+verified Foreman design run 20261101-114824-8jd1, 2026-11-01.
+Implementation and integration: Codex.
+
+This distribution includes adapted ReUI components:
+Copyright (c) 2025 Keenthemes Inc. MIT License; see licenses/reui.LICENSE.
+ReUI's stock primitives derive from shadcn/ui:
+MIT License; see licenses/shadcn.LICENSE and component-sources.json.
+
+ExpandableActionBar and its gesture helpers are copied from Spectrum UI,
+Apache License 2.0; see licenses/spectrum.LICENSE.
+Their original beUI attribution remains in the source:
+Copyright (c) 2026 Saurabh Chauhan, MIT License; see licenses/beui.LICENSE.
+Local adaptations preserve keyboard focus after actions and provide Foreman styling.
+
+The ReUI CopyButton adaptation removes analytics, uses a local native button,
+reports clipboard failures, and retains the copied-state effect.
+Bencho source/license was not retrieved; no Bencho component is claimed or shipped.
+The separately served star map retains its own Claude Foreman MIT attribution.
+
+React, React DOM, Radix UI, react-resizable-panels, Motion and utility packages
+are bundled from the exact versions recorded by history-front/package-lock.json.
