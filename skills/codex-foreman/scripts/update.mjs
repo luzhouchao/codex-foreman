@@ -2,11 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { stopHistoryUi } from './history-ui-service.mjs';
 
 export const OFFICIAL_REPOSITORY = 'https://github.com/luzhouchao/codex-foreman.git';
 
 // Never use a workspace remote or the informational source_root in the install marker.
-export function updateForeman({ home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), check = false, run = spawnSync } = {}) {
+export async function updateForeman({ home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), check = false, run = spawnSync } = {}) {
   home = path.resolve(home);
   const target = path.join(home, 'skills', 'codex-foreman');
   if (!fs.existsSync(path.join(target, 'SKILL.md'))) throw new Error('尚未安装 Foreman，不能更新');
@@ -49,8 +50,14 @@ export function updateForeman({ home = process.env.CODEX_HOME || path.join(os.ho
       current_version: installed.version || null, current_revision: installed.revision || null,
       latest_version: pkg.version, latest_revision: revision, source_root: installed.source_root || null };
     if (check || !available) return result;
-    const output = execute(process.execPath, [installer, '--update']);
-    return { ...result, status: 'updated', installation: JSON.parse(output) };
+    const historyUi = await stopHistoryUi({ home, waitForExit: true });
+    if (!historyUi.stopped && historyUi.reason !== 'not-started') throw new Error(`无法核验自有后台服务（${historyUi.reason}），拒绝继续更新`);
+    try {
+      const output = execute(process.execPath, [installer, '--update']);
+      return { ...result, status: 'updated', history_ui: historyUi, installation: JSON.parse(output) };
+    } catch (error) {
+      throw new Error(`${error.message}；${historyUi.stopped ? '自有后台服务已停止' : '后台服务未运行'}`);
+    }
   } finally {
     try {
       if (temp) {

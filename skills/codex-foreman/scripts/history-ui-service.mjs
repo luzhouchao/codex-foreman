@@ -9,8 +9,8 @@ import { discoverCodexOwner, ownerStatus, readOwnerFromEnv } from './codex-owner
 const SERVICE = 'codex-foreman-history-ui', PROTOCOL = 1;
 const secret = () => randomBytes(32).toString('hex');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-export const servicePaths = () => {
-  const home = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')), foreman = path.join(home, 'foreman'), dir = path.join(foreman, 'history-ui-service');
+export const servicePaths = (value = process.env.CODEX_HOME || path.join(os.homedir(), '.codex')) => {
+  const home = path.resolve(value), foreman = path.join(home, 'foreman'), dir = path.join(foreman, 'history-ui-service');
   return { home, foreman, dir, settings: path.join(foreman, 'history-ui-settings.json'), state: path.join(dir, 'ready.json'), lock: path.join(dir, 'start.lock'), failure: path.join(dir, 'failure.json') };
 };
 function noLinks(file) {
@@ -57,8 +57,8 @@ function request(state, route, input, csrf) {
     req.on('error', error => { clearTimeout(timer); reject(error); }); if (content) req.write(content); req.end();
   });
 }
-export async function historyUiStatus() {
-  const state = read(servicePaths().state);
+export async function historyUiStatus({ home } = {}) {
+  const state = read(servicePaths(home).state);
   if (!state) return { running: false, reason: 'not-started' };
   if (!validState(state)) return { running: false, reason: 'invalid-state' };
   try {
@@ -93,7 +93,7 @@ export async function ensureHistoryUi({ port, owner = null, manual = false, time
   const files = servicePaths(), lock = acquire();
   if (lock) {
     const payload = { launch_id: lock.launch_id, port, owner, manual: Boolean(manual) };
-    const child = spawn(process.execPath, [fileURLToPath(new URL('history-ui-daemon.mjs', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true, cwd: path.dirname(fileURLToPath(import.meta.url)), env: { ...process.env, CODEX_FOREMAN_UI_INTERNAL: '1', CODEX_FOREMAN_UI_LAUNCH: JSON.stringify(payload), ...(owner ? { CODEX_FOREMAN_OWNER_JSON: JSON.stringify(owner) } : {}) } });
+    const child = spawn(process.execPath, [fileURLToPath(new URL('history-ui-daemon.mjs', import.meta.url))], { detached: true, stdio: 'ignore', windowsHide: true, cwd: files.dir, env: { ...process.env, CODEX_HOME: files.home, CODEX_FOREMAN_UI_INTERNAL: '1', CODEX_FOREMAN_UI_LAUNCH: JSON.stringify(payload), ...(owner ? { CODEX_FOREMAN_OWNER_JSON: JSON.stringify(owner) } : {}) } });
     child.on('error', () => { try { write(files.failure, { launch_id: lock.launch_id, error: '后台 Node 服务未能启动' }); removeOwn(files.lock, 'launch_id', lock.launch_id); } catch {} });
     // The child claims the existing lock itself. A parent rewrite could recreate a lock the ready child already removed.
     child.unref();
@@ -106,10 +106,22 @@ export async function ensureHistoryUi({ port, owner = null, manual = false, time
   }
   throw new Error('后台服务正在启动或启动未完成；可稍后运行 history-ui --status 检查');
 }
-export async function stopHistoryUi() {
-  const status = await historyUiStatus();
+export async function stopHistoryUi({ home, waitForExit = false, timeoutMs = 5000 } = {}) {
+  const status = await historyUiStatus({ home });
   if (!status.running) return { stopped: false, running: false, reason: status.reason };
   await request(status.state, '/api/service/stop', { instance_id: status.state.instance_id }, status.health.csrf);
+  if (waitForExit) {
+    const deadline = Date.now() + Math.min(10000, Math.max(100, timeoutMs));
+    while (Date.now() < deadline) {
+      const current = read(servicePaths(home).state);
+      if (current && current.instance_id !== status.state.instance_id) throw new Error('后台服务实例已变化，拒绝继续更新');
+      // A PID is inspected only after authenticated RPC, never used to terminate a process.
+      // EPERM and unknown liveness retain the lock; only definite exit releases it.
+      if (!livePid(status.state.pid)) return { stopped: true, exited: true, instance_id: status.state.instance_id };
+      await sleep(50);
+    }
+    throw new Error('已请求停止自有后台服务，但尚未确认进程退出，拒绝继续更新');
+  }
   return { stopped: true, instance_id: status.state.instance_id };
 }
 export async function runHistoryUiService({ port, owner = null, manual = false, launch_id, inspectOwner = ownerStatus } = {}) {

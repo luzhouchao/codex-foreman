@@ -115,7 +115,8 @@ node "<cli>" native-record --workspace "E:\your-workspace" --input "E:\task.json
 安装器会先建立备份，失败时尝试自动恢复。
 只替换托管程序，保留配置、记忆与历史。
 默认不修改 hooks。
-更新完成后提示用户手动重启运行中的 Foreman 服务。
+更新前通过认证 RPC 停止自有网页服务。
+更新后不自动拉起网页，下次调用按需启动。
 Codex 在新会话中自动重新加载技能。
 
 ## 全局历史与界面（history / history-ui）

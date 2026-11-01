@@ -243,8 +243,8 @@ commands.cleanup = (o) => cmdCleanup(o, CONFIG.dispatch.runs_dir ? path.resolve(
 const historyRoot = (o) => o.workspace && CONFIG.dispatch.runs_dir ? path.resolve(o.workspace, CONFIG.dispatch.runs_dir) : null;
 commands.history = (o) => cmdHistory(o, historyRoot(o));
 commands['history-ui'] = (o) => cmdHistoryUi(o, historyRoot(o));
-commands.update = (o) => {
-  try { process.stdout.write(JSON.stringify(updateForeman({ check: o.check }), null, 2) + '\n'); }
+commands.update = async (o) => {
+  try { process.stdout.write(JSON.stringify(await updateForeman({ check: o.check }), null, 2) + '\n'); }
   catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 };
 if (!commands[cmd]) die(M.usage);

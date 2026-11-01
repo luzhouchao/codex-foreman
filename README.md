@@ -2,7 +2,7 @@
 
 让 Codex 负责规划与验收，把任务交给 pi、opencode 等本机 CLI。基于 [DaydayupV/claude-foreman](https://github.com/DaydayupV/claude-foreman) 的 MIT 执行器移植，保留执行、续接、讨论、审查、状态、实时日志及取消能力。
 
-Codex Foreman 0.6.5 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
+Codex Foreman 0.6.6 支持实验性 Antigravity 桌面协作。通过本机接口连接已登录的桌面，完成材料讨论和审改。支持讨论续接与取消，暂不支持代码执行。详见 [桌面接入说明](skills/codex-foreman/references/antigravity.md)。
 
 ## 安装
 
@@ -145,7 +145,8 @@ node "$cli" update
 缺少旧 revision 会重新安装官方 main 分支。
 相同 revision 会提示 up_to_date 且不重复安装。
 首次从旧版本升级到 0.6.5 仍需运行一次源码安装器。
-更新后需手动重启正在运行的服务。
+确认有可用更新后，会通过认证 RPC 停止自有网页服务并等待退出。
+更新完成后不自动拉起服务，下次实际使用时按配置启动。
 Codex 在新建会话后自动加载新技能。
 
 ### 源码安装与回退
